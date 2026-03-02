@@ -34,6 +34,21 @@ function makePreviewFromText(csvText: string, fileName?: string): Preview {
   };
 }
 
+/** Light sanity warnings (does NOT block upload) */
+function basicUploadSanityCheck(headers: string[], rows: DemoRow[]) {
+  const warnings: string[] = [];
+
+  if (!headers.length) warnings.push("No headers detected.");
+  if (!rows.length) warnings.push("No rows detected.");
+
+  // Common CSV export issue: delimiter is ';' or tab so everything becomes 1 column
+  if (headers.length === 1) {
+    warnings.push("Only 1 column detected. Your CSV might be using ';' or TAB instead of comma.");
+  }
+
+  return warnings;
+}
+
 function downloadTextFile(fileName: string, text: string, mime = "text/csv;charset=utf-8") {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -238,6 +253,13 @@ export default function UploadPage() {
 
       // save FULL rows in V2
       const parsed = parseCSV(text);
+
+      // 🔎 light sanity warnings (non-blocking)
+      const warns = basicUploadSanityCheck(parsed.headers, parsed.rows);
+      if (warns.length) {
+        setError(warns.join(" "));
+      }
+
       saveDatasetV2(key, parsed.headers, parsed.rows, { fileName: file.name });
 
       if (key === "movements") setPreviewMovements(preview);

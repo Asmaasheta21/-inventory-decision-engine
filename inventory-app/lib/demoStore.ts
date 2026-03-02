@@ -70,7 +70,11 @@ function writePayloadV1(payload: DemoPayloadV1) {
 ---------------------------------- */
 
 /** Save uploaded CSV into session (headers + rows). */
-export function saveUpload(headers: string[], rows: DemoRow[], opts?: { fileName?: string }) {
+export function saveUpload(
+  headers: string[],
+  rows: DemoRow[],
+  opts?: { fileName?: string }
+) {
   const payload: DemoPayloadV1 = {
     headers,
     rows,
@@ -84,7 +88,11 @@ export function saveUpload(headers: string[], rows: DemoRow[], opts?: { fileName
 }
 
 /** Load upload data (headers + rows). */
-export function loadUpload(): { headers: string[]; rows: DemoRow[]; meta?: DemoPayloadV1["meta"] } | null {
+export function loadUpload(): {
+  headers: string[];
+  rows: DemoRow[];
+  meta?: DemoPayloadV1["meta"];
+} | null {
   const p = readPayloadV1();
   if (!p?.headers?.length || !Array.isArray(p.rows)) return null;
   return { headers: p.headers, rows: p.rows, meta: p.meta };
@@ -148,63 +156,107 @@ function clampInt(n: number, min: number, max: number): number {
 }
 
 /* =========================================================
-   CSV parsing (shared)
+   CSV parsing (shared) - improved for real-world CSVs
 ========================================================= */
+
+function stripBOM(s: string): string {
+  // UTF-8 BOM
+  if (s && s.charCodeAt(0) === 0xfeff) return s.slice(1);
+  return s;
+}
+
+function detectDelimiter(headerLine: string): "," | ";" | "\t" | "|" {
+  const line = headerLine ?? "";
+  const candidates: Array<"," | ";" | "\t" | "|"> = [",", ";", "\t", "|"];
+  let best: "," | ";" | "\t" | "|" = ",";
+  let bestCount = -1;
+
+  for (const d of candidates) {
+    const count = line.split(d).length - 1;
+    if (count > bestCount) {
+      bestCount = count;
+      best = d;
+    }
+  }
+  return best;
+}
+
+function makeUniqueHeaders(headers: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headers.map((h, idx) => {
+    const base = (h || `col_${idx + 1}`).trim();
+    const key = base.toLowerCase();
+
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+
+    return n === 1 ? base : `${base}_${n}`;
+  });
+}
+
+function parseLineWithDelimiter(line: string, delimiter: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      const next = line[i + 1];
+      // Escaped quote inside quoted string => ""
+      if (inQuotes && next === '"') {
+        cur += '"';
+        i++;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (ch === delimiter && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  out.push(cur.trim());
+  return out;
+}
+
+function cleanCell(x: string): string {
+  const s = (x ?? "").toString().trim();
+  // Remove wrapping quotes if any
+  return s.replace(/^"|"$/g, "").trim();
+}
 
 /**
  * Parse CSV text into headers + rows.
- * - Handles quotes
- * - Handles commas inside quotes
- * - Trims values
+ * Improvements:
+ * - Detect delimiter (, ; \t |)
+ * - Strip BOM
+ * - Unique headers to avoid overwriting
+ * - Handles quotes + delimiters inside quotes
  */
 export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const normalized = stripBOM(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalized.split("\n").filter((l) => l.trim().length > 0);
 
   if (lines.length === 0) return { headers: [], rows: [] };
 
-  const parseLine = (line: string): string[] => {
-    const out: string[] = [];
-    let cur = "";
-    let inQuotes = false;
+  const delimiter = detectDelimiter(lines[0]);
 
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-
-      if (ch === '"') {
-        const next = line[i + 1];
-
-        // Escaped quote inside quoted string => ""
-        if (inQuotes && next === '"') {
-          cur += '"';
-          i++;
-          continue;
-        }
-
-        inQuotes = !inQuotes;
-        continue;
-      }
-
-      if (ch === "," && !inQuotes) {
-        out.push(cur.trim());
-        cur = "";
-        continue;
-      }
-
-      cur += ch;
-    }
-
-    out.push(cur.trim());
-    return out;
-  };
-
-  const rawHeaders = parseLine(lines[0]);
-  const headers = rawHeaders.map(cleanCell);
+  const rawHeaders = parseLineWithDelimiter(lines[0], delimiter);
+  const cleanedHeaders = rawHeaders.map(cleanCell);
+  const headers = makeUniqueHeaders(cleanedHeaders);
 
   const rows: DemoRow[] = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const cols = parseLine(lines[i]);
+    const cols = parseLineWithDelimiter(lines[i], delimiter);
     const row: DemoRow = {};
 
     for (let c = 0; c < headers.length; c++) {
@@ -216,12 +268,6 @@ export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
   }
 
   return { headers, rows };
-}
-
-function cleanCell(x: string): string {
-  const s = (x ?? "").toString().trim();
-  // Remove wrapping quotes if any
-  return s.replace(/^"|"$/g, "").trim();
 }
 
 /** Convert string to number safely. Supports "1,234" and empty. */
@@ -355,6 +401,130 @@ export function saveMappingV2(mapping: MovementsMapping) {
 export function loadMappingV2(): MovementsMapping | null {
   const s = readStateV2();
   return s?.mappingV2?.movements ?? null;
+}
+
+/* =========================================================
+   Movements validation (V2) - for real data
+========================================================= */
+
+export type MovementsValidation = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  stats: {
+    totalRows: number;
+    checkedRows: number;
+    rowsWithMissingRequired: number;
+    rowsWithBadQty: number;
+    rowsWithBadDate: number;
+  };
+};
+
+function looksLikeNumber(x: string): boolean {
+  const cleaned = (x ?? "").toString().replace(/,/g, "").trim();
+  if (cleaned === "") return false;
+  const n = Number(cleaned);
+  return Number.isFinite(n);
+}
+
+function looksLikeDate(x: string): boolean {
+  const s = (x ?? "").toString().trim();
+  if (!s) return false;
+
+  // Date.parse handles many formats; we just ensure it's not NaN
+  const t = Date.parse(s);
+  return Number.isFinite(t);
+}
+
+export function validateMovementsDataset(
+  headers: string[],
+  rows: DemoRow[],
+  mapping: MovementsMapping
+): MovementsValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const requiredCols = [mapping.itemId, mapping.date, mapping.qty, mapping.movementType].filter(Boolean);
+  if (requiredCols.length !== 4) {
+    errors.push("Missing required mapping fields (Item ID, Date, Qty, Movement Type).");
+  }
+
+  // ensure required columns exist in headers
+  for (const col of requiredCols) {
+    if (!headers.includes(col)) errors.push(`Mapped column not found in CSV headers: "${col}".`);
+  }
+
+  if (errors.length) {
+    return {
+      ok: false,
+      errors,
+      warnings,
+      stats: {
+        totalRows: rows.length,
+        checkedRows: 0,
+        rowsWithMissingRequired: 0,
+        rowsWithBadQty: 0,
+        rowsWithBadDate: 0,
+      },
+    };
+  }
+
+  const sampleSize = Math.min(rows.length, 200); // enough to catch issues quickly
+  let missingReq = 0;
+  let badQty = 0;
+  let badDate = 0;
+
+  for (let i = 0; i < sampleSize; i++) {
+    const r = rows[i];
+
+    const item = (r[mapping.itemId] ?? "").trim();
+    const dt = (r[mapping.date] ?? "").trim();
+    const qty = (r[mapping.qty] ?? "").trim();
+    const mt = (r[mapping.movementType] ?? "").trim();
+
+    if (!item || !dt || !qty || !mt) {
+      missingReq++;
+      continue;
+    }
+
+    if (!looksLikeNumber(qty)) badQty++;
+    if (!looksLikeDate(dt)) badDate++;
+  }
+
+  if (rows.length === 0) errors.push("Movements.csv has headers but no data rows.");
+
+  // hard-fail conditions
+  if (missingReq === sampleSize && sampleSize > 0) {
+    errors.push("Movements sample rows are missing required values (item/date/qty/type). Check mapping or CSV data.");
+  }
+
+  // warnings (not hard fail)
+  if (badQty > 0) warnings.push(`Quantity looks non-numeric in ${badQty}/${sampleSize} checked rows.`);
+  if (badDate > 0) warnings.push(`Date looks unparseable in ${badDate}/${sampleSize} checked rows.`);
+
+  // hint for negative qty reality
+  let neg = 0;
+  for (let i = 0; i < sampleSize; i++) {
+    const q = (rows[i]?.[mapping.qty] ?? "").toString().replace(/,/g, "").trim();
+    const n = Number(q);
+    if (Number.isFinite(n) && n < 0) neg++;
+  }
+  if (neg > 0) warnings.push(`Detected negative quantities in ${neg}/${sampleSize} checked rows (this is common in some ERPs).`);
+
+  const ok = errors.length === 0;
+
+  return {
+    ok,
+    errors,
+    warnings,
+    stats: {
+      totalRows: rows.length,
+      checkedRows: sampleSize,
+      rowsWithMissingRequired: missingReq,
+      rowsWithBadQty: badQty,
+      rowsWithBadDate: badDate,
+    },
+  };
 }
 
 /* -------------------------------
