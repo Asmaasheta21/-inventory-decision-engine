@@ -2,24 +2,70 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loadUpload, saveMapping, Mapping } from "@/lib/demoStore";
+import {
+  loadDatasetV2,
+  saveMappingV2,
+  loadMappingV2,
+  type MovementsMapping,
+} from "@/lib/demoStore";
 
 export default function MappingPage() {
   const router = useRouter();
-  const data = typeof window !== "undefined" ? loadUpload() : null;
 
-  const headers = data?.headers ?? [];
-  const sampleRows = data?.rows?.slice(0, 6) ?? [];
-  const meta = data?.meta;
+  const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
 
-  // smart-ish defaults (try to auto-pick common column names)
+  const headers = movements?.headers ?? [];
+  const sampleRows = movements?.rows?.slice(0, 6) ?? [];
+  const fileName = movements?.fileName ?? "Movements.csv";
+  const rowsTotal = movements?.rows?.length ?? 0;
+
+  const lower = (s: string) => s.toLowerCase().trim();
+
   const guess = (candidates: string[]) =>
-    headers.find((h) => candidates.includes(h.toLowerCase().trim())) ?? "";
+    headers.find((h) => candidates.includes(lower(h))) ?? "";
 
-  const [sku, setSku] = useState<string>(guess(["sku", "item", "item_code", "material", "material_id"]) || headers[0] || "");
-  const [onHand, setOnHand] = useState<string>(guess(["on_hand", "stock", "qty", "quantity", "balance"]) || headers[1] || "");
-  const [sales30d, setSales30d] = useState<string>(guess(["sales_30d", "sales", "sold_30d", "qty_sold_30d"]) || headers[2] || "");
-  const [warehouse, setWarehouse] = useState<string>(guess(["warehouse", "wh", "location", "storage_location", "plant"]) || "");
+  // load saved mapping (if any) first
+  const saved = typeof window !== "undefined" ? loadMappingV2() : null;
+
+  const [itemId, setItemId] = useState<string>(
+    saved?.itemId ||
+      guess(["item_id", "sku", "material", "material_id", "item", "itemcode", "item_code"]) ||
+      headers[0] ||
+      ""
+  );
+
+  const [date, setDate] = useState<string>(
+    saved?.date ||
+      guess(["date", "posting_date", "movement_date", "doc_date", "document_date"]) ||
+      headers[1] ||
+      ""
+  );
+
+  const [qty, setQty] = useState<string>(
+    saved?.qty ||
+      guess(["qty", "quantity", "movement_qty", "issue_qty", "receipt_qty", "amount"]) ||
+      headers[2] ||
+      ""
+  );
+
+  const [movementType, setMovementType] = useState<string>(
+    saved?.movementType ||
+      guess(["movement_type", "mov_type", "type", "mvt", "transaction_type", "movement"]) ||
+      headers[3] ||
+      ""
+  );
+
+  const [warehouse, setWarehouse] = useState<string>(
+    saved?.warehouse ||
+      guess(["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"]) ||
+      ""
+  );
+
+  const [uom, setUom] = useState<string>(
+    saved?.uom ||
+      guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) ||
+      ""
+  );
 
   const [error, setError] = useState<string>("");
 
@@ -125,7 +171,7 @@ export default function MappingPage() {
     };
   }, []);
 
-  if (!data) {
+  if (!movements) {
     return (
       <div style={styles.wrap}>
         <div className="bg-breathe" style={{ minHeight: "100vh" }}>
@@ -133,7 +179,7 @@ export default function MappingPage() {
             <div style={styles.cardPad}>
               <h1 style={{ margin: 0, fontSize: 26, fontWeight: 950 }}>Mapping</h1>
               <p style={{ marginTop: 10, color: "#b7bed1", lineHeight: 1.7 }}>
-                No uploaded CSV found. Go to Upload first.
+                No Movements dataset found. Go to Upload first.
               </p>
               <a className="btn-glow" href="/upload" style={styles.btnPrimary as any}>
                 Go to Upload
@@ -148,30 +194,38 @@ export default function MappingPage() {
   function validate() {
     setError("");
 
-    if (!sku || !onHand || !sales30d) {
-      setError("Please map SKU, On Hand, and Sales (30d).");
+    if (!itemId || !date || !qty || !movementType) {
+      setError("Please map Item ID, Date, Quantity, and Movement Type.");
       return false;
     }
 
-    const required = [sku, onHand, sales30d];
+    const required = [itemId, date, qty, movementType];
     if (new Set(required).size !== required.length) {
-      setError("SKU / On Hand / Sales must be different columns.");
+      setError("Item ID / Date / Qty / Movement Type must be different columns.");
       return false;
     }
 
     return true;
   }
 
-  function continueToResults() {
+  function continueNext() {
     if (!validate()) return;
 
-    const mapping: Mapping = { sku, onHand, sales30d, warehouse: warehouse || undefined };
-    saveMapping(mapping);
+    const mapping: MovementsMapping = {
+      itemId,
+      date,
+      qty,
+      movementType,
+      warehouse: warehouse || undefined,
+      uom: uom || undefined,
+    };
+
+    saveMappingV2(mapping);
+
+    // المرحلة الجاية: نعمل movement type value mapping
+    // دلوقتي هنروح results (هتتعدل بعدين عشان تعتمد على Movements)
     router.push("/results");
   }
-
-  const fileLabel = meta?.fileName ? meta.fileName : "Uploaded CSV";
-  const rowsTotal = meta?.rowCount ?? data.rows.length;
 
   return (
     <div style={styles.wrap}>
@@ -183,7 +237,7 @@ export default function MappingPage() {
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
-                <div style={styles.subtitle}>Demo • Column Mapping</div>
+                <div style={styles.subtitle}>Demo • Movements Mapping</div>
               </div>
             </div>
 
@@ -200,14 +254,14 @@ export default function MappingPage() {
           <div style={styles.hero}>
             {/* Left: Mapping */}
             <div className="anim-in anim-delay-2" style={styles.cardPad}>
-              <span style={styles.pill}>🧩 Column Mapping</span>
-              <h1 style={styles.h1}>Tell us what each column means</h1>
+              <span style={styles.pill}>🧩 Movements Mapping</span>
+              <h1 style={styles.h1}>Tell us what each movement column means</h1>
               <p style={styles.p}>
-                Companies don’t have the same file format. This step makes the demo work with almost any CSV.
+                This file is the inventory ledger. We only need a few columns to calculate stock and consumption.
               </p>
 
               <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={styles.badge}>{fileLabel}</span>
+                <span style={styles.badge}>{fileName}</span>
                 <span style={{ fontSize: 12, color: "#8f97ad" }}>
                   {headers.length} columns • {rowsTotal} rows
                 </span>
@@ -215,29 +269,41 @@ export default function MappingPage() {
 
               <div style={styles.grid}>
                 <Field
-                  label="SKU / Item code"
-                  value={sku}
-                  setValue={setSku}
+                  label="Item ID / SKU"
+                  value={itemId}
+                  setValue={setItemId}
                   headers={headers}
                   styles={styles}
-                  hint="The unique identifier of the product/material."
+                  hint="Unique identifier of the product/material."
                 />
+
                 <Field
-                  label="On Hand (current stock)"
-                  value={onHand}
-                  setValue={setOnHand}
+                  label="Movement Date"
+                  value={date}
+                  setValue={setDate}
                   headers={headers}
                   styles={styles}
-                  hint="Current available quantity in stock."
+                  hint="Date of the movement (posting/document date)."
                 />
+
                 <Field
-                  label="Sales (last 30 days)"
-                  value={sales30d}
-                  setValue={setSales30d}
+                  label="Quantity"
+                  value={qty}
+                  setValue={setQty}
                   headers={headers}
                   styles={styles}
-                  hint="Total sold quantity in the last 30 days."
+                  hint="Movement quantity (positive number)."
                 />
+
+                <Field
+                  label="Movement Type"
+                  value={movementType}
+                  setValue={setMovementType}
+                  headers={headers}
+                  styles={styles}
+                  hint="What happened? receipt/issue/transfer/adjust/scrap..."
+                />
+
                 <Field
                   label="Warehouse (optional)"
                   value={warehouse}
@@ -247,21 +313,31 @@ export default function MappingPage() {
                   hint="If you have multiple warehouses/locations, map it here."
                   allowNone
                 />
+
+                <Field
+                  label="UOM (optional)"
+                  value={uom}
+                  setValue={setUom}
+                  headers={["", ...headers]}
+                  styles={styles}
+                  hint="Unit of measure (piece/case/liter...). Needed only if it exists."
+                  allowNone
+                />
               </div>
 
               <div style={styles.row}>
                 <button className="btn-glow" style={styles.btnGhost} type="button" onClick={() => router.push("/upload")}>
                   Back
                 </button>
-                <button className="btn-glow" style={styles.btnPrimary} type="button" onClick={continueToResults}>
-                  Continue to Results
+                <button className="btn-glow" style={styles.btnPrimary} type="button" onClick={continueNext}>
+                  Continue
                 </button>
               </div>
 
               {error ? <div style={styles.error}>{error}</div> : null}
 
               <div style={styles.note}>
-                Tip: If you don’t have warehouse column, choose “— none —”.
+                Next step (later): we’ll ask you to map movement type values (e.g., “GI” → ISSUE).
               </div>
             </div>
 
@@ -273,8 +349,16 @@ export default function MappingPage() {
               </div>
 
               <div style={styles.kpiGrid}>
-                <KPI title="Mapped fields" value={`${[sku, onHand, sales30d].filter(Boolean).length}/3`} styles={styles} />
-                <KPI title="Optional" value={warehouse ? "Warehouse ✓" : "No warehouse"} styles={styles} />
+                <KPI
+                  title="Mapped (required)"
+                  value={`${[itemId, date, qty, movementType].filter(Boolean).length}/4`}
+                  styles={styles}
+                />
+                <KPI
+                  title="Optional"
+                  value={`${warehouse ? "Warehouse ✓" : "No warehouse"} • ${uom ? "UOM ✓" : "No UOM"}`}
+                  styles={styles}
+                />
                 <KPI title="Next" value="Results" styles={styles} />
               </div>
 
@@ -307,7 +391,6 @@ export default function MappingPage() {
             </div>
           </div>
 
-          {/* Global styles (same vibe as landing/upload) */}
           <style jsx global>{`
             .bg-breathe {
               background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
