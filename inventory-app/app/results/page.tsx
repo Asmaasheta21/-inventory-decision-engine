@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   loadMapping,
@@ -9,6 +9,10 @@ import {
   saveThresholds,
   toNumber,
 } from "@/lib/demoStore";
+
+/* =========================================================
+   Types
+========================================================= */
 
 type Decision = "ORDER_NOW" | "WATCH" | "REDUCE" | "DEAD" | "HEALTHY";
 
@@ -19,13 +23,27 @@ type Thresholds = {
 };
 
 type InsightParams = {
-  // distribution learned from dataset
   p50Daily: number;
   p80Daily: number;
   p95Daily: number;
-
-  // normalization helpers
   maxDaily: number;
+};
+
+type EvidenceTone = "cyan" | "amber" | "green" | "red" | "violet" | "steel";
+
+type EvidenceChip = {
+  k: string;
+  v: string;
+  tone?: EvidenceTone;
+};
+
+type ProTeaseRow = {
+  sku: string;
+  warehouse: string;
+  signal: "Transfer" | "Safety" | "Forecast" | "Policy";
+  preview: string; // blurred
+  reason: string; // blurred
+  impact?: number; // blurred
 };
 
 type RowOut = {
@@ -46,11 +64,15 @@ type RowOut = {
 
   decision: Decision;
   severity: number; // 0..100
-  confidence: number; // 0..100 (data quality heuristic)
+  confidence: number; // 0..100
 
   actionTitle: string;
   reason: string;
   tips: string[];
+
+  evidence: EvidenceChip[];
+  dataFlags: string[];
+  confidenceExplain: string[];
 
   // Optional (if columns exist)
   unitCost?: number;
@@ -58,10 +80,37 @@ type RowOut = {
   moq?: number;
   casePack?: number;
 
-  // Optional impact (if price/cost exist)
+  // Optional impact
   stockoutRiskValue?: number;
   overstockValue?: number;
+
+  // Demo-only: Pro preview rows generated from severity signals
+  proPreview: ProTeaseRow[];
 };
+
+type KPIOut = {
+  orderNow: number;
+  watch: number;
+  reduce: number;
+  dead: number;
+  healthy: number;
+
+  avgConfidence: number;
+  alertScore: number;
+
+  flaggedRows: number;
+  totalStockoutValue: number;
+  totalOverstockValue: number;
+
+  topUrgent: RowOut[];
+  topValueRisk: RowOut[];
+
+  recommendations: string[];
+};
+
+/* =========================================================
+   Page
+========================================================= */
 
 export default function ResultsPage() {
   const upload = typeof window !== "undefined" ? loadUpload() : null;
@@ -76,12 +125,17 @@ export default function ResultsPage() {
   const [safetyDays, setSafetyDays] = useState<number>(initialT.safetyDays);
   const [overstockDays, setOverstockDays] = useState<number>(initialT.overstockDays);
 
-  const [preset, setPreset] = useState<"CUSTOM" | "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE">("CUSTOM");
+  const [preset, setPreset] = useState<
+    "CUSTOM" | "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE"
+  >("CUSTOM");
 
   const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
   const [decisionFilter, setDecisionFilter] = useState<Decision | "ALL">("ALL");
   const [search, setSearch] = useState<string>("");
-  const [sort, setSort] = useState<"SEVERITY" | "SUGGESTED" | "COVER_ASC" | "COVER_DESC" | "IMPACT">("SEVERITY");
+  const [sort, setSort] = useState<
+    "SEVERITY" | "SUGGESTED" | "COVER_ASC" | "COVER_DESC" | "IMPACT"
+  >("SEVERITY");
+
   const [expandedRowKey, setExpandedRowKey] = useState<string | null>(null);
 
   const styles = useMemo(() => {
@@ -119,8 +173,16 @@ export default function ResultsPage() {
     };
 
     return {
-      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Inter, Arial, sans-serif" } as CSSProperties,
-      container: { maxWidth: 1180, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
+      wrap: {
+        minHeight: "100vh",
+        color: "#e6e8ee",
+        fontFamily: "Inter, Arial, sans-serif",
+      } as CSSProperties,
+      container: {
+        maxWidth: 1180,
+        margin: "0 auto",
+        padding: "18px 20px 60px",
+      } as CSSProperties,
 
       topbar: {
         display: "flex",
@@ -158,21 +220,49 @@ export default function ResultsPage() {
         border: "1px solid transparent",
       } as CSSProperties,
 
-      grid: { display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 } as CSSProperties,
+      grid: {
+        display: "grid",
+        gridTemplateColumns: "1.05fr 0.95fr",
+        gap: 16,
+      } as CSSProperties,
       card,
       cardPad: { ...card, padding: 18 } as CSSProperties,
 
       h1: { margin: 0, fontSize: 26, fontWeight: 950 } as CSSProperties,
       p: { margin: "8px 0 0", color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
 
-      badge: (tone: "cyan" | "amber" | "green" | "red" | "violet" | "steel") => {
+      badge: (tone: EvidenceTone) => {
         const map = {
-          cyan: { b: "rgba(110,231,255,0.25)", bg: "rgba(110,231,255,0.08)", c: "#dfe3f1" },
-          amber: { b: "rgba(255,170,70,0.28)", bg: "rgba(255,170,70,0.10)", c: "#ffd9a8" },
-          green: { b: "rgba(120,255,170,0.25)", bg: "rgba(120,255,170,0.08)", c: "#c7ffe0" },
-          red: { b: "rgba(255,80,80,0.25)", bg: "rgba(255,80,80,0.08)", c: "#ffd4d4" },
-          violet: { b: "rgba(167,139,250,0.28)", bg: "rgba(167,139,250,0.10)", c: "#e6dcff" },
-          steel: { b: "rgba(170,177,196,0.22)", bg: "rgba(170,177,196,0.08)", c: "#c8cee0" },
+          cyan: {
+            b: "rgba(110,231,255,0.25)",
+            bg: "rgba(110,231,255,0.08)",
+            c: "#dfe3f1",
+          },
+          amber: {
+            b: "rgba(255,170,70,0.28)",
+            bg: "rgba(255,170,70,0.10)",
+            c: "#ffd9a8",
+          },
+          green: {
+            b: "rgba(120,255,170,0.25)",
+            bg: "rgba(120,255,170,0.08)",
+            c: "#c7ffe0",
+          },
+          red: {
+            b: "rgba(255,80,80,0.25)",
+            bg: "rgba(255,80,80,0.08)",
+            c: "#ffd4d4",
+          },
+          violet: {
+            b: "rgba(167,139,250,0.28)",
+            bg: "rgba(167,139,250,0.10)",
+            c: "#e6dcff",
+          },
+          steel: {
+            b: "rgba(170,177,196,0.22)",
+            bg: "rgba(170,177,196,0.08)",
+            c: "#c8cee0",
+          },
         }[tone];
 
         return {
@@ -187,21 +277,56 @@ export default function ResultsPage() {
         } as CSSProperties;
       },
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
-      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      kpiGrid: {
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: 10,
+        marginTop: 12,
+      } as CSSProperties,
+      kpi: {
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.55)",
+      } as CSSProperties,
       kpiT: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
       kpiV: { fontSize: 22, fontWeight: 950, marginTop: 6 } as CSSProperties,
       kpiS: { fontSize: 12, color: "#8f97ad", marginTop: 4, lineHeight: 1.4 } as CSSProperties,
 
-      controls: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 12 } as CSSProperties,
-      box: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      controls: {
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 12,
+        marginTop: 12,
+      } as CSSProperties,
+      box: {
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.55)",
+      } as CSSProperties,
       label: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
       input,
       select: { ...input, marginTop: 8 } as CSSProperties,
 
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14, alignItems: "center" } as CSSProperties,
-      btnPrimary: { ...btnBase, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
-      btnGhost: { ...btnBase, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as CSSProperties,
+      row: {
+        display: "flex",
+        gap: 10,
+        flexWrap: "wrap",
+        marginTop: 14,
+        alignItems: "center",
+      } as CSSProperties,
+      btnPrimary: {
+        ...btnBase,
+        background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+        color: "#0b0f1a",
+      } as CSSProperties,
+      btnGhost: {
+        ...btnBase,
+        background: "transparent",
+        border: "1px solid #2a3350",
+        color: "#e6e8ee",
+      } as CSSProperties,
 
       tableWrap: {
         marginTop: 12,
@@ -212,7 +337,12 @@ export default function ResultsPage() {
         padding: 10,
       } as CSSProperties,
 
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px", minWidth: 1180 } as CSSProperties,
+      table: {
+        width: "100%",
+        borderCollapse: "separate",
+        borderSpacing: "0 8px",
+        minWidth: 1180,
+      } as CSSProperties,
       thead: { position: "sticky", top: 78, zIndex: 10 } as CSSProperties,
 
       th: {
@@ -229,10 +359,16 @@ export default function ResultsPage() {
       tr: {
         background: "rgba(20,27,48,0.55)",
         cursor: "pointer",
-        transition: "transform 140ms ease, box-shadow 140ms ease, background 140ms ease",
+        transition:
+          "transform 140ms ease, box-shadow 140ms ease, background 140ms ease",
       } as CSSProperties,
 
-      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0", verticalAlign: "top" } as CSSProperties,
+      td: {
+        padding: "10px 10px",
+        fontSize: 13,
+        color: "#c8cee0",
+        verticalAlign: "top",
+      } as CSSProperties,
 
       sevBar: {
         height: 8,
@@ -265,12 +401,55 @@ export default function ResultsPage() {
         border: "1px solid rgba(167,139,250,0.28)",
         background: "rgba(167,139,250,0.08)",
       } as CSSProperties,
-      lockTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 } as CSSProperties,
+      lockTop: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 10,
+      } as CSSProperties,
       lockTitle: { fontWeight: 950 } as CSSProperties,
       blur: { filter: "blur(6px)", opacity: 0.78 } as CSSProperties,
-      lockBtn: { ...btnBase, background: "linear-gradient(135deg,#a78bfa,#6ee7ff)", color: "#0b0f1a" } as CSSProperties,
+      lockBtn: {
+        ...btnBase,
+        background: "linear-gradient(135deg,#a78bfa,#6ee7ff)",
+        color: "#0b0f1a",
+      } as CSSProperties,
 
-      legendRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "center" } as CSSProperties,
+      legendRow: {
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        marginTop: 12,
+        alignItems: "center",
+      } as CSSProperties,
+
+      miniChips: {
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        marginTop: 6,
+      } as CSSProperties,
+
+      dangerBox: {
+        marginTop: 10,
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid rgba(255,80,80,0.25)",
+        background: "rgba(255,80,80,0.06)",
+      } as CSSProperties,
+
+      proTable: {
+        width: "100%",
+        borderCollapse: "separate",
+        borderSpacing: "0 8px",
+      } as CSSProperties,
+
+      proRow: {
+        padding: 10,
+        borderRadius: 14,
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.55)",
+      } as CSSProperties,
     };
   }, []);
 
@@ -309,14 +488,13 @@ export default function ResultsPage() {
     if (sort === "COVER_ASC") return a.daysCover - b.daysCover;
     if (sort === "COVER_DESC") return b.daysCover - a.daysCover;
 
-    // IMPACT: prefer stockout risk value, fallback to overstock value, fallback severity
     const ai = (a.stockoutRiskValue ?? 0) + (a.overstockValue ?? 0);
     const bi = (b.stockoutRiskValue ?? 0) + (b.overstockValue ?? 0);
     if (bi !== ai) return bi - ai;
     return b.severity - a.severity;
   });
 
-  const kpi = computeKPIsPremium(allRows);
+  const kpi = computeKPIsPremium(allRows, thresholds);
   const targetCover = thresholds.leadTimeDays + thresholds.safetyDays;
 
   function applyPreset(p: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE") {
@@ -343,7 +521,11 @@ export default function ResultsPage() {
   }
 
   function saveT() {
-    saveThresholds({ leadTimeDays: thresholds.leadTimeDays, safetyDays: thresholds.safetyDays, overstockDays: thresholds.overstockDays });
+    saveThresholds({
+      leadTimeDays: thresholds.leadTimeDays,
+      safetyDays: thresholds.safetyDays,
+      overstockDays: thresholds.overstockDays,
+    });
   }
 
   function exportCSV() {
@@ -368,6 +550,7 @@ export default function ResultsPage() {
       "case_pack",
       "stockout_risk_value",
       "overstock_value",
+      "data_flags_count",
       "reason",
     ];
     const lines = [header.join(",")];
@@ -395,6 +578,7 @@ export default function ResultsPage() {
           (r.casePack ?? "").toString(),
           (r.stockoutRiskValue ?? "").toString(),
           (r.overstockValue ?? "").toString(),
+          (r.dataFlags?.length ?? 0).toString(),
           csvSafe(r.reason),
         ].join(",")
       );
@@ -424,7 +608,7 @@ export default function ResultsPage() {
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
                 <div style={styles.subtitle}>
-                  Premium Ops Actions • Policy-driven (Lead/Safety/Overstock)
+                  Demo • Ops Action Queue • Evidence-based decisions
                 </div>
               </div>
             </div>
@@ -443,8 +627,8 @@ export default function ResultsPage() {
                 <div>
                   <h1 style={styles.h1}>Ops Action Queue</h1>
                   <p style={styles.p}>
-                    Your policy drives the math: Target Cover = Lead ({thresholds.leadTimeDays}d) + Safety ({thresholds.safetyDays}d) = <b>{targetCover}d</b>.
-                    The engine prioritizes by urgency + velocity + shortage size (and money impact if provided).
+                    Policy math is explicit: Target Cover = Lead ({thresholds.leadTimeDays}d) + Safety ({thresholds.safetyDays}d) ={" "}
+                    <b>{targetCover}d</b>. We prioritize by urgency + velocity + shortage size, plus money impact when available.
                   </p>
                 </div>
 
@@ -467,10 +651,15 @@ export default function ResultsPage() {
                 <span style={decisionBadge(styles, "REDUCE")}>REDUCE</span>
                 <span style={decisionBadge(styles, "DEAD")}>DEAD</span>
                 <span style={decisionBadge(styles, "HEALTHY")}>HEALTHY</span>
-                <span style={styles.badge("steel")}>Confidence: {kpi.avgConfidence}%</span>
+
+                <span style={styles.badge("steel")}>Avg Confidence: {kpi.avgConfidence}%</span>
+
+                {kpi.flaggedRows > 0 && (
+                  <span style={styles.badge("red")}>Flagged rows: {kpi.flaggedRows}</span>
+                )}
               </div>
 
-              {/* Presets (optional) */}
+              {/* Presets */}
               <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={styles.badge("violet")}>Policy Presets</span>
 
@@ -480,7 +669,9 @@ export default function ResultsPage() {
                   style={{
                     ...styles.btnGhost,
                     border:
-                      preset === "CONSERVATIVE" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
+                      preset === "CONSERVATIVE"
+                        ? "1px solid rgba(110,231,255,0.55)"
+                        : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("CONSERVATIVE")}
                 >
@@ -493,7 +684,9 @@ export default function ResultsPage() {
                   style={{
                     ...styles.btnGhost,
                     border:
-                      preset === "BALANCED" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
+                      preset === "BALANCED"
+                        ? "1px solid rgba(110,231,255,0.55)"
+                        : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("BALANCED")}
                 >
@@ -506,7 +699,9 @@ export default function ResultsPage() {
                   style={{
                     ...styles.btnGhost,
                     border:
-                      preset === "AGGRESSIVE" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
+                      preset === "AGGRESSIVE"
+                        ? "1px solid rgba(110,231,255,0.55)"
+                        : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("AGGRESSIVE")}
                 >
@@ -646,7 +841,7 @@ export default function ResultsPage() {
                       <th style={styles.th}>On Hand</th>
                       <th style={styles.th}>Sales 30d</th>
                       <th style={styles.th}>Cover (d)</th>
-                      <th style={styles.th}>Action</th>
+                      <th style={styles.th}>Evidence</th>
                     </tr>
                   </thead>
 
@@ -656,9 +851,8 @@ export default function ResultsPage() {
                       const expanded = expandedRowKey === key;
 
                       return (
-                        <>
+                        <React.Fragment key={key}>
                           <tr
-                            key={key}
                             style={styles.tr}
                             className="row-hoverable"
                             onClick={() => setExpandedRowKey(expanded ? null : key)}
@@ -666,6 +860,7 @@ export default function ResultsPage() {
                           >
                             <td style={styles.td}><b>{r.sku}</b></td>
                             <td style={styles.td}>{r.warehouse}</td>
+
                             <td style={styles.td}>
                               <span style={decisionBadge(styles, r.decision)}>{r.decision}</span>
                             </td>
@@ -683,6 +878,11 @@ export default function ResultsPage() {
                               <span style={styles.badge(r.confidence >= 80 ? "green" : r.confidence >= 60 ? "amber" : "red")}>
                                 {r.confidence}%
                               </span>
+                              {r.dataFlags.length > 0 && (
+                                <div style={{ marginTop: 6 }}>
+                                  <span style={styles.badge("red")}>Flags: {r.dataFlags.length}</span>
+                                </div>
+                              )}
                             </td>
 
                             <td style={styles.td}>
@@ -700,31 +900,62 @@ export default function ResultsPage() {
                             <td style={styles.td}>
                               <div style={{ fontWeight: 950 }}>{r.actionTitle}</div>
                               <div style={styles.muted}>{r.reason}</div>
+
+                              <div style={styles.miniChips}>
+                                {r.evidence.slice(0, 4).map((e) => (
+                                  <span key={e.k} style={styles.badge(e.tone ?? "steel")}>
+                                    {e.k}: {e.v}
+                                  </span>
+                                ))}
+                              </div>
                             </td>
                           </tr>
 
                           {expanded && (
-                            <tr key={`${key}__expanded`} style={{ background: "rgba(20,27,48,0.35)" }}>
+                            <tr style={{ background: "rgba(20,27,48,0.35)" }}>
                               <td style={{ ...styles.td }} colSpan={10}>
-                                <div style={{ display: "grid", gap: 10 }}>
-                                  <div style={{ fontWeight: 950 }}>Immediate Checklist</div>
-
-                                  <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 13 }}>
-                                    {(r.tips ?? []).slice(0, 5).map((t, i) => (
-                                      <li key={i}>{t}</li>
-                                    ))}
-                                  </ul>
-
-                                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                <div style={{ display: "grid", gap: 12 }}>
+                                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                                    <span style={styles.badge("violet")}>Evidence pack</span>
                                     <span style={styles.badge("steel")}>Target cover: {r.targetCover}d</span>
                                     <span style={styles.badge("steel")}>Reorder point: {round2(r.reorderPoint)}</span>
                                     <span style={styles.badge("steel")}>Avg/day: {round2(r.avgDaily)}</span>
+
                                     {(r.stockoutRiskValue ?? 0) > 0 && (
-                                      <span style={styles.badge("red")}>Stockout risk value: {money(r.stockoutRiskValue!)}</span>
+                                      <span style={styles.badge("red")}>
+                                        Stockout risk value: {money(r.stockoutRiskValue!)}
+                                      </span>
                                     )}
                                     {(r.overstockValue ?? 0) > 0 && (
-                                      <span style={styles.badge("amber")}>Overstock value: {money(r.overstockValue!)}</span>
+                                      <span style={styles.badge("amber")}>
+                                        Overstock value: {money(r.overstockValue!)}
+                                      </span>
                                     )}
+                                  </div>
+
+                                  {r.dataFlags.length > 0 && (
+                                    <div style={styles.dangerBox}>
+                                      <div style={{ fontWeight: 950, marginBottom: 6 }}>
+                                        Data quality flags (affect confidence)
+                                      </div>
+                                      <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 13 }}>
+                                        {r.dataFlags.slice(0, 6).map((f, i) => <li key={i}>{f}</li>)}
+                                      </ul>
+
+                                      <div style={{ marginTop: 8, ...styles.muted }}>
+                                        Confidence breakdown:
+                                        <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                                          {r.confidenceExplain.slice(0, 6).map((c, i) => <li key={i}>{c}</li>)}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div>
+                                    <div style={{ fontWeight: 950 }}>Immediate Checklist</div>
+                                    <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 13 }}>
+                                      {(r.tips ?? []).slice(0, 6).map((t, i) => <li key={i}>{t}</li>)}
+                                    </ul>
                                   </div>
 
                                   {(r.unitCost || r.unitPrice || r.moq || r.casePack) && (
@@ -736,11 +967,53 @@ export default function ResultsPage() {
                                       {r.casePack ? ` case_pack=${r.casePack}` : ""}
                                     </div>
                                   )}
+
+                                  {/* Pro preview */}
+                                  <div style={styles.locked}>
+                                    <div style={styles.lockTop}>
+                                      <div>
+                                        <div style={styles.lockTitle}>Pro: Auto-resolved actions (Preview)</div>
+                                        <div style={styles.muted}>
+                                          Transfers + recommended safety days + policy optimizer. Preview is intentionally blurred.
+                                        </div>
+                                      </div>
+                                      <button className="btn-glow" style={styles.lockBtn} type="button">
+                                        Upgrade to Pro
+                                      </button>
+                                    </div>
+
+                                    <div style={{ marginTop: 12, ...styles.blur }}>
+                                      <table style={styles.proTable}>
+                                        <thead>
+                                          <tr>
+                                            <th style={{ ...styles.th, borderRadius: 10 }}>Signal</th>
+                                            <th style={styles.th}>Preview</th>
+                                            <th style={styles.th}>Reason</th>
+                                            <th style={styles.th}>Impact</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {r.proPreview.slice(0, 4).map((p, idx) => (
+                                            <tr key={idx}>
+                                              <td style={styles.td}>
+                                                <span style={styles.badge(p.signal === "Transfer" ? "violet" : p.signal === "Safety" ? "amber" : "steel")}>
+                                                  {p.signal}
+                                                </span>
+                                              </td>
+                                              <td style={styles.td}>{p.preview}</td>
+                                              <td style={styles.td}>{p.reason}</td>
+                                              <td style={styles.td}>{p.impact ? money(p.impact) : "—"}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
                                 </div>
                               </td>
                             </tr>
                           )}
-                        </>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -763,34 +1036,80 @@ export default function ResultsPage() {
                 {renderOpsNarrativePremium(kpi, thresholds)}
               </div>
 
-              <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
-                <div style={{ fontWeight: 950, marginBottom: 8 }}>What to do today</div>
-                <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
-                  {kpi.recommendations.map((x: string) => <li key={x}>{x}</li>)}
-                </ul>
-              </div>
-
-              <div style={styles.locked}>
-                <div style={styles.lockTop}>
-                  <div>
-                    <div style={styles.lockTitle}>Pro: Warehouse transfer suggestions</div>
-                    <div style={styles.muted}>Balance stock across warehouses automatically.</div>
+              <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                <div style={styles.box}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontWeight: 950 }}>Money impact (if provided)</div>
+                    <span style={styles.badge("steel")}>Demo</span>
                   </div>
-                  <button className="btn-glow" style={styles.lockBtn} type="button">
-                    Upgrade to Pro
-                  </button>
+
+                  <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div style={styles.kpi}>
+                      <div style={styles.kpiT}>Stockout risk value</div>
+                      <div style={styles.kpiV}>{money(kpi.totalStockoutValue)}</div>
+                      <div style={styles.kpiS}>Lead-time window estimate</div>
+                    </div>
+                    <div style={styles.kpi}>
+                      <div style={styles.kpiT}>Overstock value</div>
+                      <div style={styles.kpiV}>{money(kpi.totalOverstockValue)}</div>
+                      <div style={styles.kpiS}>Above threshold estimate</div>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: 12, ...styles.blur }}>
-                  <div style={{ fontWeight: 900 }}>Transfers</div>
-                  <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
-                    <li>Move units from overstock warehouses to prevent stockouts elsewhere</li>
-                    <li>Consolidate slow movers to reduce holding costs</li>
+
+                <div style={styles.box}>
+                  <div style={{ fontWeight: 950, marginBottom: 8 }}>Top urgent items (today)</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {kpi.topUrgent.slice(0, 5).map((r) => (
+                      <div
+                        key={`${r.sku}__${r.warehouse}__urgent`}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 950 }}>{r.sku} <span style={styles.muted}>• {r.warehouse}</span></div>
+                          <div style={styles.muted}>{r.actionTitle}</div>
+                        </div>
+                        <span style={styles.badge(r.severity >= 85 ? "red" : r.severity >= 65 ? "amber" : "violet")}>
+                          {r.severity}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
+                  <div style={{ fontWeight: 950, marginBottom: 8 }}>What to do today</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
+                    {kpi.recommendations.map((x) => <li key={x}>{x}</li>)}
                   </ul>
                 </div>
-              </div>
 
-              <div style={{ marginTop: 12, ...styles.muted }}>
-                Notes: Lead/Safety/Overstock are YOUR inputs. This engine only translates your policy into actions + prioritization.
+                <div style={styles.locked}>
+                  <div style={styles.lockTop}>
+                    <div>
+                      <div style={styles.lockTitle}>Pro: “Fix it for me” mode</div>
+                      <div style={styles.muted}>
+                        Auto-generated purchase list + transfer plan + tuned safety days.
+                      </div>
+                    </div>
+                    <button className="btn-glow" style={styles.lockBtn} type="button">
+                      Upgrade to Pro
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 12, ...styles.blur }}>
+                    <div style={{ fontWeight: 900 }}>Auto Plan (Preview)</div>
+                    <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
+                      <li>PO bundle: consolidate orders across suppliers to minimize rush costs</li>
+                      <li>Transfers: move stock from overstock locations to prevent stockouts elsewhere</li>
+                      <li>Safety optimizer: recommend safety days based on demand volatility</li>
+                      <li>Policy tuning: suggest targets to reduce cash tied up without losing service level</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div style={{ ...styles.muted }}>
+                  Notes: Lead/Safety/Overstock are YOUR inputs. This engine translates your policy into actions + prioritization + evidence.
+                </div>
               </div>
             </div>
           </div>
@@ -833,19 +1152,21 @@ export default function ResultsPage() {
   );
 }
 
-/* ===================== PREMIUM LOGIC ===================== */
+/* =========================================================
+   PREMIUM LOGIC
+========================================================= */
 
 function buildResultsPremium(rows: Record<string, string>[], m: any, t: Thresholds): RowOut[] {
   const targetCover = Math.max(0, t.leadTimeDays + t.safetyDays);
 
-  // First pass: compute avgDaily distribution for normalization (premium feel)
+  // Pass 1: demand distribution (for “premium” normalization)
   const avgDailyList: number[] = [];
   for (const row of rows) {
-    const sku = (row[m.sku] ?? "").toString().trim();
+    const sku = (row?.[m?.sku] ?? "").toString().trim();
     if (!sku) continue;
-    const sales30d = toNumber(row[m.sales30d] ?? "0");
+    const sales30d = toNumber(row?.[m?.sales30d] ?? "0");
     const avgDaily = sales30d / 30;
-    if (avgDaily > 0) avgDailyList.push(avgDaily);
+    if (avgDaily > 0 && Number.isFinite(avgDaily)) avgDailyList.push(avgDaily);
   }
   avgDailyList.sort((a, b) => a - b);
 
@@ -856,17 +1177,17 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
     maxDaily: Math.max(1e-6, avgDailyList.length ? avgDailyList[avgDailyList.length - 1] : 1),
   };
 
-  // Second pass: build rows with premium classification
+  // Pass 2: compute outputs
   const out: RowOut[] = [];
 
   for (const row of rows) {
-    const sku = (row[m.sku] ?? "").toString().trim();
+    const sku = (row?.[m?.sku] ?? "").toString().trim();
     if (!sku) continue;
 
-    const wh = m.warehouse ? ((row[m.warehouse] ?? "").toString().trim() || "—") : "—";
+    const wh = m?.warehouse ? ((row?.[m?.warehouse] ?? "").toString().trim() || "—") : "—";
 
-    const onHand = toNumber(row[m.onHand] ?? "0");
-    const sales30d = toNumber(row[m.sales30d] ?? "0");
+    const onHand = toNumber(row?.[m?.onHand] ?? "0");
+    const sales30d = toNumber(row?.[m?.sales30d] ?? "0");
 
     const avgDaily = sales30d / 30;
     const daysCover = avgDaily > 0 ? onHand / avgDaily : onHand > 0 ? 9999 : 0;
@@ -874,7 +1195,7 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
     const reorderPoint = avgDaily * targetCover;
     const suggestedOrder = Math.max(0, Math.round(reorderPoint - onHand));
 
-    // Optional fields (auto-detect by common column names)
+    // Optional fields (auto-detect by common names in row)
     const unitCost = pickOptNumber(row, ["unit_cost", "cost", "unitCost", "unit_cost_usd", "unit_cost_egp"]);
     const unitPrice = pickOptNumber(row, ["unit_price", "price", "unitPrice", "unit_price_usd", "unit_price_egp"]);
     const moq = pickOptNumber(row, ["moq", "MOQ", "min_order_qty", "minOrderQty"]);
@@ -882,20 +1203,36 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
 
     const rounded = roundOrder(suggestedOrder, moq, casePack);
 
-    const { decision, severity, confidence, actionTitle, reason, tips, stockoutRiskValue, overstockValue } =
-      classifyPremium({
-        onHand,
-        sales30d,
-        avgDaily,
-        daysCover,
-        reorderPoint,
-        suggestedOrder,
-        suggestedOrderRounded: rounded,
-        t,
-        params,
-        unitCost,
-        unitPrice,
-      });
+    const {
+      decision,
+      severity,
+      confidence,
+      actionTitle,
+      reason,
+      tips,
+      stockoutRiskValue,
+      overstockValue,
+      dataFlags,
+      confidenceExplain,
+      evidence,
+      proPreview,
+    } = classifyPremium({
+      sku,
+      warehouse: wh,
+      onHand,
+      sales30d,
+      avgDaily,
+      daysCover,
+      reorderPoint,
+      suggestedOrder,
+      suggestedOrderRounded: rounded,
+      t,
+      params,
+      unitCost,
+      unitPrice,
+      moq,
+      casePack,
+    });
 
     out.push({
       sku,
@@ -914,12 +1251,16 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
       actionTitle,
       reason,
       tips,
+      evidence,
+      dataFlags,
+      confidenceExplain,
       unitCost: isFiniteNum(unitCost) ? unitCost : undefined,
       unitPrice: isFiniteNum(unitPrice) ? unitPrice : undefined,
       moq: isFiniteNum(moq) ? moq : undefined,
       casePack: isFiniteNum(casePack) ? casePack : undefined,
       stockoutRiskValue,
       overstockValue,
+      proPreview,
     });
   }
 
@@ -928,6 +1269,8 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
 }
 
 function classifyPremium(x: {
+  sku: string;
+  warehouse: string;
   onHand: number;
   sales30d: number;
   avgDaily: number;
@@ -939,6 +1282,8 @@ function classifyPremium(x: {
   params: InsightParams;
   unitCost?: number;
   unitPrice?: number;
+  moq?: number;
+  casePack?: number;
 }): {
   decision: Decision;
   severity: number;
@@ -948,8 +1293,29 @@ function classifyPremium(x: {
   tips: string[];
   stockoutRiskValue?: number;
   overstockValue?: number;
+
+  dataFlags: string[];
+  confidenceExplain: string[];
+  evidence: EvidenceChip[];
+  proPreview: ProTeaseRow[];
 } {
-  const { onHand, sales30d, avgDaily, daysCover, reorderPoint, suggestedOrder, suggestedOrderRounded, t, params, unitCost, unitPrice } = x;
+  const {
+    sku,
+    warehouse,
+    onHand,
+    sales30d,
+    avgDaily,
+    daysCover,
+    reorderPoint,
+    suggestedOrder,
+    suggestedOrderRounded,
+    t,
+    params,
+    unitCost,
+    unitPrice,
+    moq,
+    casePack,
+  } = x;
 
   const lead = Math.max(0, t.leadTimeDays);
   const safety = Math.max(0, t.safetyDays);
@@ -959,22 +1325,43 @@ function classifyPremium(x: {
   const daysToStockout = avgDaily > 0 ? daysCover : onHand > 0 ? 9999 : 0;
   const unitsMissing = Math.max(0, reorderPoint - onHand);
 
-  // Confidence heuristic (premium trust):
-  // penalize weird data patterns: negative values, missing demand with huge stock, etc.
+  const dataFlags: string[] = [];
+  if (!Number.isFinite(onHand) || !Number.isFinite(sales30d)) dataFlags.push("Non-numeric values detected (check mapping / CSV).");
+  if (onHand < 0) dataFlags.push("Negative on-hand (data issue or timing mismatch).");
+  if (sales30d < 0) dataFlags.push("Negative sales (returns/adjustments may be mixed).");
+  if (sales30d === 0 && onHand > 0) dataFlags.push("No demand in 30 days while stock exists (slow/dead risk).");
+  if (avgDaily > 0 && daysCover > 999) dataFlags.push("Extremely high cover (check sales period / outliers).");
+  if (avgDaily === 0 && sales30d !== 0) dataFlags.push("Demand anomaly (avgDaily=0 but sales30d!=0).");
+
+  // Confidence heuristic (transparent)
   let confidence = 100;
-  if (onHand < 0 || sales30d < 0) confidence -= 40;
-  if (sales30d === 0 && onHand > 500) confidence -= 15;
-  if (avgDaily > 0 && daysCover > 999) confidence -= 10;
+  const explain: string[] = [];
+
+  const penalty = (pts: number, msg: string) => {
+    confidence -= pts;
+    explain.push(`-${pts}: ${msg}`);
+  };
+
+  if (onHand < 0) penalty(35, "Negative on-hand");
+  if (sales30d < 0) penalty(25, "Negative sales");
+  if (sales30d === 0 && onHand > 500) penalty(12, "No sales but large stock (possible mismatch/discontinued)");
+  if (avgDaily > 0 && daysCover > 999) penalty(10, "Extreme cover value");
+  if (suggestedOrder > 0 && suggestedOrderRounded === 0) penalty(8, "Rounding collapsed order qty (MOQ/pack)");
+  if (Number.isNaN(avgDaily) || !Number.isFinite(avgDaily)) penalty(40, "Invalid demand rate");
+  if (dataFlags.length === 0) explain.push("+0: Data looks consistent");
+
   confidence = clamp(confidence, 35, 100);
 
   // Money impact (optional)
-  const stockoutRiskValue = (unitPrice && avgDaily > 0)
-    ? Math.max(0, (lead - Math.min(lead, daysToStockout))) * avgDaily * unitPrice
-    : undefined;
+  const stockoutRiskValue =
+    unitPrice && avgDaily > 0
+      ? Math.max(0, (lead - Math.min(lead, daysToStockout))) * avgDaily * unitPrice
+      : undefined;
 
-  const overstockValue = (unitCost && avgDaily > 0 && daysCover > overstockDays)
-    ? (daysCover - overstockDays) * avgDaily * unitCost
-    : undefined;
+  const overstockValue =
+    unitCost && avgDaily > 0 && daysCover > overstockDays
+      ? (daysCover - overstockDays) * avgDaily * unitCost
+      : undefined;
 
   const velocityClass =
     avgDaily >= params.p80Daily ? "FAST" : avgDaily >= params.p50Daily ? "MEDIUM" : "SLOW";
@@ -983,33 +1370,87 @@ function classifyPremium(x: {
   const urgencyLead = lead > 0 ? clamp((lead - daysToStockout) / lead, 0, 1) : 0;
   const urgencyTarget = targetCover > 0 ? clamp((targetCover - daysToStockout) / targetCover, 0, 1) : 0;
   const shortageRatio = reorderPoint > 0 ? clamp(unitsMissing / reorderPoint, 0, 1) : 0;
-  const velocityScore = clamp(avgDaily / Math.max(1e-6, params.p95Daily), 0, 1);
+  const velocityScore = clamp(avgDaily / Math.max(1e-6, params.p95Daily || 1e-6), 0, 1);
 
-  // Decision logic (policy-driven, clean)
+  const coverTone = (d: number): EvidenceTone => {
+    if (avgDaily <= 0) return "steel";
+    if (d < lead) return "red";
+    if (d < targetCover) return "amber";
+    if (d > overstockDays) return "amber";
+    return "green";
+  };
+
+  const evidence: EvidenceChip[] = [
+    { k: "Cover", v: `${round2(daysCover)}d`, tone: coverTone(daysCover) },
+    { k: "Target", v: `${targetCover}d`, tone: "steel" },
+    { k: "Lead", v: `${lead}d`, tone: "steel" },
+    { k: "ROP", v: `${Math.round(reorderPoint)}`, tone: "steel" },
+    { k: "Miss", v: `${Math.max(0, Math.round(unitsMissing))}`, tone: unitsMissing > 0 ? "amber" : "green" },
+    { k: "Vel", v: velocityClass, tone: velocityClass === "FAST" ? "violet" : velocityClass === "MEDIUM" ? "cyan" : "steel" },
+    ...(moq ? [{ k: "MOQ", v: `${moq}`, tone: "steel" as EvidenceTone }] : []),
+    ...(casePack ? [{ k: "Pack", v: `${casePack}`, tone: "steel" as EvidenceTone }] : []),
+  ];
+
+  // Pro preview: generated hints (blurred)
+  const proPreview: ProTeaseRow[] = buildProPreview({
+    sku,
+    warehouse,
+    decision: "HEALTHY",
+    severity: 0,
+    avgDaily,
+    daysCover,
+    lead,
+    safety,
+    overstockDays,
+    stockoutRiskValue,
+    overstockValue,
+  });
+
+  // Decision logic (policy-driven)
   // 1) No sales
   if (sales30d <= 0) {
     if (onHand > 0) {
       const deadLike = onHand >= 50 || daysCover >= overstockDays;
       const sev = clamp(Math.round(35 + Math.min(65, onHand / 7)), 0, 100);
 
+      const tips = deadLike
+        ? [
+            "Freeze replenishment immediately.",
+            "Run clearance plan: bundle / markdown / liquidation (track results).",
+            "Verify if SKU is discontinued or mapped incorrectly.",
+            "If strategic stock, mark it as exception in policy (Pro).",
+          ]
+        : [
+            "Pause replenishment temporarily.",
+            "Test demand: placement or small promo.",
+            "If still zero sales next cycle → treat as DEAD.",
+          ];
+
       return {
         decision: deadLike ? "DEAD" : "REDUCE",
         severity: sev,
         confidence,
         actionTitle: deadLike ? "Freeze & clear dead stock" : "Reduce exposure (slow mover)",
-        reason: `No sales in 30 days while stock exists (On Hand ${onHand}). Likely dead/slow inventory.`,
-        tips: deadLike
-          ? [
-              "Freeze replenishment immediately.",
-              "Run clearance: bundle / markdown / liquidation (small steps, track results).",
-              "Verify data: discontinued SKU, wrong warehouse, or bad mapping?",
-              "If strategic stock, mark as exception in policy.",
-            ]
-          : [
-              "Pause replenishment temporarily.",
-              "Test demand with a small promo or placement change.",
-              "If still zero sales next cycle → treat as DEAD.",
-            ],
+        reason: `No sales in 30 days while stock exists (On Hand ${onHand}).`,
+        tips,
+        stockoutRiskValue,
+        overstockValue,
+        dataFlags,
+        confidenceExplain: explain,
+        evidence,
+        proPreview: buildProPreview({
+          sku,
+          warehouse,
+          decision: deadLike ? "DEAD" : "REDUCE",
+          severity: sev,
+          avgDaily,
+          daysCover,
+          lead,
+          safety,
+          overstockDays,
+          stockoutRiskValue,
+          overstockValue,
+        }),
       };
     }
 
@@ -1019,49 +1460,103 @@ function classifyPremium(x: {
       confidence,
       actionTitle: "No action required",
       reason: "No sales and no stock — stable.",
-      tips: ["Keep monitoring. If sales return, the engine will flag replenishment."],
+      tips: ["Keep monitoring. If demand returns, the engine will flag replenishment."],
+      stockoutRiskValue,
+      overstockValue,
+      dataFlags,
+      confidenceExplain: explain,
+      evidence,
+      proPreview: buildProPreview({
+        sku,
+        warehouse,
+        decision: "HEALTHY",
+        severity: 5,
+        avgDaily,
+        daysCover,
+        lead,
+        safety,
+        overstockDays,
+        stockoutRiskValue,
+        overstockValue,
+      }),
     };
   }
 
   // 2) Stockout now
   if (avgDaily > 0 && onHand <= 0) {
     const sev = 98;
+
     return {
       decision: "ORDER_NOW",
       severity: sev,
       confidence,
       actionTitle: "Expedite now (stockout already)",
-      reason: `Demand exists (${round2(avgDaily)}/day) but On Hand is 0 → stockout happening now.`,
+      reason: `Demand exists (${round2(avgDaily)}/day) but On Hand is 0 → stockout now.`,
       tips: [
         "Expedite a rush PO or emergency transfer TODAY.",
-        "Confirm inbound PO dates + supplier commitment.",
-        "Consider raising Safety Days if lead time is unstable.",
+        "Confirm inbound POs and supplier commitment.",
+        "If lead time is unstable, increase Safety Days.",
       ],
       stockoutRiskValue,
       overstockValue,
+      dataFlags,
+      confidenceExplain: explain,
+      evidence,
+      proPreview: buildProPreview({
+        sku,
+        warehouse,
+        decision: "ORDER_NOW",
+        severity: sev,
+        avgDaily,
+        daysCover,
+        lead,
+        safety,
+        overstockDays,
+        stockoutRiskValue,
+        overstockValue,
+      }),
     };
   }
 
   // 3) Critical: stockout before lead time
   if (daysToStockout < lead) {
-    const sev = clamp(Math.round(55 + urgencyLead * 30 + velocityScore * 10 + shortageRatio * 20), 0, 100);
+    const sev = clamp(
+      Math.round(55 + urgencyLead * 30 + velocityScore * 10 + shortageRatio * 20),
+      0,
+      100
+    );
 
     return {
       decision: "ORDER_NOW",
       severity: sev,
       confidence,
       actionTitle: "Order now (risk before lead time)",
-      reason:
-        `Cover ${round2(daysCover)}d < Lead ${lead}d. Target ${targetCover}d. Missing ~${Math.round(unitsMissing)} units to reach policy.`,
+      reason: `Cover ${round2(daysCover)}d < Lead ${lead}d. Target ${targetCover}d. Missing ~${Math.round(unitsMissing)} units.`,
       tips: [
         `Place PO now for ~${suggestedOrderRounded} units (policy target).`,
         velocityClass === "FAST"
-          ? "FAST mover → prioritize supplier confirmation and expedite if needed."
-          : "Confirm no upcoming demand spike (promo/seasonality) before finalizing.",
+          ? "FAST mover → prioritize supplier confirmation; expedite if needed."
+          : "Check upcoming demand changes before finalizing.",
         "Review open POs to avoid double-ordering.",
       ],
       stockoutRiskValue,
       overstockValue,
+      dataFlags,
+      confidenceExplain: explain,
+      evidence,
+      proPreview: buildProPreview({
+        sku,
+        warehouse,
+        decision: "ORDER_NOW",
+        severity: sev,
+        avgDaily,
+        daysCover,
+        lead,
+        safety,
+        overstockDays,
+        stockoutRiskValue,
+        overstockValue,
+      }),
     };
   }
 
@@ -1074,16 +1569,32 @@ function classifyPremium(x: {
       severity: sev,
       confidence,
       actionTitle: "Watch closely (prepare PO)",
-      reason: `Cover ${round2(daysCover)}d is below policy target ${targetCover}d (Lead ${lead}+Safety ${safety}).`,
+      reason: `Cover ${round2(daysCover)}d is below policy target ${targetCover}d.`,
       tips: [
         `Prepare draft PO for ~${suggestedOrderRounded} units.`,
-        "Re-check supplier lead time; small delays can escalate to ORDER_NOW.",
+        "Re-check supplier lead time; small slips can flip to ORDER_NOW.",
         velocityClass === "FAST"
           ? "FAST mover → monitor daily for 3–5 days."
           : "Monitor weekly unless demand changes.",
       ],
       stockoutRiskValue,
       overstockValue,
+      dataFlags,
+      confidenceExplain: explain,
+      evidence,
+      proPreview: buildProPreview({
+        sku,
+        warehouse,
+        decision: "WATCH",
+        severity: sev,
+        avgDaily,
+        daysCover,
+        lead,
+        safety,
+        overstockDays,
+        stockoutRiskValue,
+        overstockValue,
+      }),
     };
   }
 
@@ -1101,10 +1612,26 @@ function classifyPremium(x: {
       tips: [
         "Freeze replenishment for this SKU.",
         "Run targeted promo / bundle to reduce holding risk.",
-        "If multi-warehouse: move stock toward higher demand locations (Pro).",
+        "Pro: transfer to higher demand locations automatically.",
       ],
       stockoutRiskValue,
       overstockValue,
+      dataFlags,
+      confidenceExplain: explain,
+      evidence,
+      proPreview: buildProPreview({
+        sku,
+        warehouse,
+        decision: "REDUCE",
+        severity: sev,
+        avgDaily,
+        daysCover,
+        lead,
+        safety,
+        overstockDays,
+        stockoutRiskValue,
+        overstockValue,
+      }),
     };
   }
 
@@ -1116,29 +1643,57 @@ function classifyPremium(x: {
     severity: sev,
     confidence,
     actionTitle: "Stable (within policy)",
-    reason: `Within policy thresholds. Cover ${round2(daysCover)}d vs target ${targetCover}d.`,
-    tips: [
-      "No immediate action required.",
-      "Review policy monthly or after supplier performance changes.",
-    ],
+    reason: `Within policy. Cover ${round2(daysCover)}d vs target ${targetCover}d.`,
+    tips: ["No immediate action required.", "Review policy monthly or after supplier performance changes."],
     stockoutRiskValue,
     overstockValue,
+    dataFlags,
+    confidenceExplain: explain,
+    evidence,
+    proPreview: buildProPreview({
+      sku,
+      warehouse,
+      decision: "HEALTHY",
+      severity: sev,
+      avgDaily,
+      daysCover,
+      lead,
+      safety,
+      overstockDays,
+      stockoutRiskValue,
+      overstockValue,
+    }),
   };
 }
 
-/* ===================== KPI + NARRATIVE ===================== */
+/* =========================================================
+   KPI + NARRATIVE
+========================================================= */
 
-function computeKPIsPremium(all: RowOut[]) {
+function computeKPIsPremium(all: RowOut[], t: Thresholds): KPIOut {
   const orderNow = all.filter((r) => r.decision === "ORDER_NOW").length;
   const watch = all.filter((r) => r.decision === "WATCH").length;
   const reduce = all.filter((r) => r.decision === "REDUCE").length;
   const dead = all.filter((r) => r.decision === "DEAD").length;
+  const healthy = all.filter((r) => r.decision === "HEALTHY").length;
 
-  const avgSev = all.length ? Math.round(all.reduce((s, r) => s + r.severity, 0) / all.length) : 0;
-  const avgConfidence = all.length ? Math.round(all.reduce((s, r) => s + r.confidence, 0) / all.length) : 0;
+  const avgConfidence = all.length
+    ? Math.round(all.reduce((s, r) => s + r.confidence, 0) / all.length)
+    : 0;
+
+  const avgSev = all.length
+    ? Math.round(all.reduce((s, r) => s + r.severity, 0) / all.length)
+    : 0;
+
+  const flaggedRows = all.reduce((s, r) => s + (r.dataFlags?.length ? 1 : 0), 0);
 
   const alertScore = clamp(
-    Math.round(avgSev * 0.85 + (orderNow > 0 ? 10 : 0) + (dead > 0 ? 5 : 0)),
+    Math.round(
+      avgSev * 0.82 +
+        (orderNow > 0 ? 10 : 0) +
+        (dead > 0 ? 6 : 0) +
+        (flaggedRows > 0 ? 6 : 0)
+    ),
     0,
     100
   );
@@ -1146,14 +1701,26 @@ function computeKPIsPremium(all: RowOut[]) {
   const totalStockoutValue = round2(all.reduce((s, r) => s + (r.stockoutRiskValue ?? 0), 0));
   const totalOverstockValue = round2(all.reduce((s, r) => s + (r.overstockValue ?? 0), 0));
 
+  const topUrgent = [...all].sort((a, b) => b.severity - a.severity).slice(0, 10);
+  const topValueRisk = [...all].sort((a, b) => {
+    const ai = (a.stockoutRiskValue ?? 0) + (a.overstockValue ?? 0);
+    const bi = (b.stockoutRiskValue ?? 0) + (b.overstockValue ?? 0);
+    return bi - ai;
+  }).slice(0, 10);
+
+  const targetCover = t.leadTimeDays + t.safetyDays;
+
   const rec: string[] = [];
   if (orderNow > 0) rec.push("Execute ORDER_NOW items first (prevent immediate stockouts).");
   if (watch > 0) rec.push("Convert WATCH into POs based on demand trend + supplier reliability.");
   if (dead > 0) rec.push("Dead stock: freeze replenishment and start clearance plan.");
   if (reduce > 0) rec.push("Overstock: pause buying and reduce exposure via promos/transfers.");
+  if (flaggedRows > 0) rec.push("Fix flagged rows (mapping/data) to increase confidence in recommendations.");
   if (!rec.length) rec.push("System is stable today. Review policy weekly.");
 
-  if (totalStockoutValue > 0) rec.push(`Estimated stockout risk value (lead-time window): ${money(totalStockoutValue)}.`);
+  rec.push(`Target cover = ${targetCover}d. Adjust Safety Days based on supplier reliability.`);
+
+  if (totalStockoutValue > 0) rec.push(`Estimated stockout risk value: ${money(totalStockoutValue)}.`);
   if (totalOverstockValue > 0) rec.push(`Estimated overstock value above threshold: ${money(totalOverstockValue)}.`);
 
   return {
@@ -1161,31 +1728,124 @@ function computeKPIsPremium(all: RowOut[]) {
     watch,
     reduce,
     dead,
-    alertScore,
+    healthy,
     avgConfidence,
+    alertScore,
+    flaggedRows,
+    totalStockoutValue,
+    totalOverstockValue,
+    topUrgent,
+    topValueRisk,
     recommendations: rec,
   };
 }
 
-function renderOpsNarrativePremium(kpi: any, t: Thresholds) {
+function renderOpsNarrativePremium(kpi: KPIOut, t: Thresholds) {
   const targetCover = t.leadTimeDays + t.safetyDays;
 
   const parts: string[] = [];
   parts.push(
-    `Your policy: Target Cover = ${targetCover}d (Lead ${t.leadTimeDays} + Safety ${t.safetyDays}). Overstock threshold = ${t.overstockDays}d.`
+    `Policy: Target Cover = ${targetCover}d (Lead ${t.leadTimeDays} + Safety ${t.safetyDays}). Overstock threshold = ${t.overstockDays}d.`
   );
 
   if (kpi.alertScore >= 70) parts.push("Risk: HIGH — protect service level today.");
   else if (kpi.alertScore >= 45) parts.push("Risk: MODERATE — WATCH items can flip quickly if lead time slips.");
   else parts.push("Risk: LOW — most items are stable under your current policy.");
 
-  parts.push(`Confidence score (data quality): ${kpi.avgConfidence}%.`);
-  parts.push("Premium rule: change Safety Days based on supplier reliability, not only demand.");
+  parts.push(`Data confidence: ${kpi.avgConfidence}%.`);
+  if (kpi.flaggedRows > 0) parts.push(`${kpi.flaggedRows} items have data flags impacting confidence.`);
 
+  parts.push("Decision is evidence-based: cover, target, shortage size, and (optional) money impact.");
   return parts.join(" ");
 }
 
-/* ===================== UI HELPERS ===================== */
+/* =========================================================
+   Pro Preview Generator (Demo-only)
+========================================================= */
+
+function buildProPreview(x: {
+  sku: string;
+  warehouse: string;
+  decision: Decision;
+  severity: number;
+  avgDaily: number;
+  daysCover: number;
+  lead: number;
+  safety: number;
+  overstockDays: number;
+  stockoutRiskValue?: number;
+  overstockValue?: number;
+}): ProTeaseRow[] {
+  const { sku, warehouse, decision, severity, avgDaily, daysCover, lead, safety, overstockDays, stockoutRiskValue, overstockValue } = x;
+
+  // Deterministic pseudo-signals (no randomness)
+  const baseImpact = Math.round(((stockoutRiskValue ?? 0) + (overstockValue ?? 0)) || (severity * 120));
+
+  const rows: ProTeaseRow[] = [];
+
+  if (decision === "ORDER_NOW" || (avgDaily > 0 && daysCover < lead)) {
+    rows.push({
+      sku,
+      warehouse,
+      signal: "Transfer",
+      preview: `Move from WH-A → ${warehouse} (auto-ranked)`,
+      reason: `Prevent stockout before ${lead}d lead window`,
+      impact: baseImpact,
+    });
+    rows.push({
+      sku,
+      warehouse,
+      signal: "Safety",
+      preview: `Recommended safety: ${Math.max(3, safety + 2)}d`,
+      reason: `Volatility suggests higher buffer for service level`,
+      impact: Math.round(baseImpact * 0.45),
+    });
+  }
+
+  if (avgDaily > 0 && daysCover > overstockDays) {
+    rows.push({
+      sku,
+      warehouse,
+      signal: "Policy",
+      preview: `Reduce target cover for cash optimization`,
+      reason: `Excess cover above threshold (${overstockDays}d)`,
+      impact: baseImpact,
+    });
+    rows.push({
+      sku,
+      warehouse,
+      signal: "Forecast",
+      preview: `Next 14d demand: ${Math.max(0, Math.round(avgDaily * 14))} units`,
+      reason: `Forecast uses trend + outlier control`,
+      impact: Math.round(baseImpact * 0.35),
+    });
+  }
+
+  if (!rows.length) {
+    rows.push({
+      sku,
+      warehouse,
+      signal: "Forecast",
+      preview: `Next 14d demand: ${Math.max(0, Math.round(avgDaily * 14))} units`,
+      reason: "Forecast uses trend + noise filtering",
+      impact: baseImpact ? Math.round(baseImpact * 0.25) : undefined,
+    });
+    rows.push({
+      sku,
+      warehouse,
+      signal: "Safety",
+      preview: `Recommended safety: ${Math.max(2, safety)}d`,
+      reason: "Tuned from volatility bands",
+      impact: baseImpact ? Math.round(baseImpact * 0.18) : undefined,
+    });
+  }
+
+  return rows;
+}
+
+/* =========================================================
+   UI Helpers
+========================================================= */
 
 function decisionBadge(styles: any, d: Decision): CSSProperties {
   if (d === "ORDER_NOW") return styles.badge("red");
@@ -1215,7 +1875,9 @@ function KPI({ title, value, sub, styles }: { title: string; value: any; sub: st
   );
 }
 
-/* ===================== UTILS ===================== */
+/* =========================================================
+   Utils
+========================================================= */
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
@@ -1272,7 +1934,7 @@ function percentile(sorted: number[], p: number) {
 }
 
 function money(n: number) {
-  // keep it simple + premium readable
+  if (!Number.isFinite(n)) return "—";
   const x = Math.round(n);
   return x.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
