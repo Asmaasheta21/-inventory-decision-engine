@@ -243,10 +243,22 @@ export type Dataset = {
   fileName?: string;
 };
 
+export type MovementsMapping = {
+  itemId: string;
+  date: string;
+  qty: string;
+  movementType: string;
+  warehouse?: string;
+  uom?: string;
+};
+
 export type DemoStateV2 = {
   datasets: Partial<Record<DatasetKey, Dataset>>;
   meta?: { createdAtISO: string };
-  // لاحقًا: mappingV2 / thresholdsV2 / movementTypeValueMap / uomBase...
+  // Mapping for V2 flows
+  mappingV2?: {
+    movements?: MovementsMapping;
+  };
 };
 
 const STORAGE_KEY_V2 = "ide_demo_state_v2";
@@ -321,6 +333,28 @@ export function clearDatasetV2(key: DatasetKey) {
   if (!s?.datasets) return;
   delete s.datasets[key];
   writeStateV2(s);
+}
+
+/* -------------------------------
+   V2 Mapping (Movements)
+-------------------------------- */
+
+export function saveMappingV2(mapping: MovementsMapping) {
+  const s: DemoStateV2 =
+    readStateV2() ?? {
+      datasets: {},
+      meta: { createdAtISO: new Date().toISOString() },
+    };
+
+  s.mappingV2 = s.mappingV2 ?? {};
+  s.mappingV2.movements = mapping;
+
+  writeStateV2(s);
+}
+
+export function loadMappingV2(): MovementsMapping | null {
+  const s = readStateV2();
+  return s?.mappingV2?.movements ?? null;
 }
 
 /* -------------------------------
