@@ -1,451 +1,477 @@
 "use client";
 
-import Link from "next/link";
-import React, { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { clearDemo, parseCSV, saveUpload } from "@/lib/demoStore";
 
-type Row = Record<string, string>;
+type Preview = {
+  headers: string[];
+  rows: Record<string, string>[];
+  fileName?: string;
+};
 
 export default function UploadPage() {
-  const [mode, setMode] = useState<"paste" | "upload" | "connect">("paste");
+  const router = useRouter();
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [fileName, setFileName] = useState("");
-  const [rows, setRows] = useState<Row[]>([]);
-  const [columns, setColumns] = useState<string[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string>("");
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const [pasted, setPasted] = useState("");
+  const styles = useMemo(() => {
+    const card: React.CSSProperties = {
+      borderRadius: 18,
+      border: "1px solid #1b2340",
+      background: "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
+    };
 
-  const hint = useMemo(
-    () => "Recommended columns: sku | on_hand | avg_daily_sales (optional: unit_cost)",
-    []
-  );
+    const btn: React.CSSProperties = {
+      padding: "10px 14px",
+      borderRadius: 12,
+      fontWeight: 800,
+      textDecoration: "none",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      cursor: "pointer",
+      userSelect: "none",
+    };
 
-  function hydrate(data: Row[], header: string[]) {
-    setColumns(header);
-    setRows(data);
-    localStorage.setItem("ide_rows", JSON.stringify(data));
+    return {
+      wrap: {
+        minHeight: "100vh",
+        color: "#e6e8ee",
+        fontFamily: "Arial, sans-serif",
+      } as React.CSSProperties,
+
+      container: {
+        maxWidth: 1080,
+        margin: "0 auto",
+        padding: "18px 20px 60px",
+      } as React.CSSProperties,
+
+      topbar: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        marginBottom: 18,
+      } as React.CSSProperties,
+
+      brand: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      } as React.CSSProperties,
+
+      logo: {
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+      } as React.CSSProperties,
+
+      title: { fontWeight: 900, letterSpacing: 0.2 } as React.CSSProperties,
+      subtitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+
+      link: {
+        color: "#b7bed1",
+        textDecoration: "none",
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid transparent",
+      } as React.CSSProperties,
+
+      btnPrimary: {
+        ...btn,
+        background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+        color: "#0b0f1a",
+        border: "none",
+      } as React.CSSProperties,
+
+      btnGhost: {
+        ...btn,
+        background: "transparent",
+        color: "#e6e8ee",
+        border: "1px solid #2a3350",
+      } as React.CSSProperties,
+
+      hero: {
+        display: "grid",
+        gridTemplateColumns: "1.05fr 0.95fr",
+        gap: 16,
+      } as React.CSSProperties,
+
+      card,
+      cardPad: { ...card, padding: 18 } as React.CSSProperties,
+
+      pill: {
+        display: "inline-block",
+        padding: "6px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 900,
+        color: "#dfe3f1",
+        border: "1px solid rgba(110,231,255,0.25)",
+        background: "rgba(110,231,255,0.08)",
+      } as React.CSSProperties,
+
+      h1: { margin: "10px 0 8px", fontSize: 30, lineHeight: 1.15 } as React.CSSProperties,
+      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
+
+      drop: {
+        marginTop: 14,
+        borderRadius: 16,
+        border: dragOver ? "1px solid rgba(110,231,255,0.55)" : "1px dashed #2a3350",
+        background: dragOver ? "rgba(110,231,255,0.08)" : "rgba(20,27,48,0.35)",
+        padding: 16,
+        transition: "200ms ease",
+      } as React.CSSProperties,
+
+      dropTitle: { fontWeight: 900, marginBottom: 8 } as React.CSSProperties,
+      hint: { fontSize: 13, color: "#8f97ad", lineHeight: 1.6 } as React.CSSProperties,
+
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as React.CSSProperties,
+
+      error: {
+        marginTop: 12,
+        padding: 12,
+        borderRadius: 12,
+        border: "1px solid rgba(255,80,80,0.35)",
+        background: "rgba(255,80,80,0.08)",
+        color: "#ffd4d4",
+      } as React.CSSProperties,
+
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 } as React.CSSProperties,
+      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
+      kpiTitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+      kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
+
+      tableWrap: { marginTop: 14, overflowX: "auto" } as React.CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
+      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as React.CSSProperties,
+      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
+      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as React.CSSProperties,
+
+      footerNote: { marginTop: 12, fontSize: 12, color: "#8f97ad" } as React.CSSProperties,
+    };
+  }, [dragOver]);
+
+  async function handleFile(file: File | null) {
+    setError("");
+    if (!file) return;
+
+    setBusy(true);
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCSV(text);
+
+      if (!headers.length) throw new Error("CSV looks empty.");
+      if (rows.length < 1) throw new Error("CSV has headers but no data rows.");
+
+      // Preview first 10 rows only
+      setPreview({
+        headers,
+        rows: rows.slice(0, 10),
+        fileName: file.name,
+      });
+
+      // Save full rows to session + go mapping
+      clearDemo();
+      saveUpload(headers, rows, { fileName: file.name });
+
+      // Small delay for “premium feel”
+      setTimeout(() => {
+        router.push("/mapping");
+      }, 250);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to read CSV.");
+    } finally {
+      setBusy(false);
+      setDragOver(false);
+    }
   }
 
-  function parseDelimited(text: string, delimiter: string) {
-    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length < 2) throw new Error("Add at least header + 1 row.");
+  function useSampleData() {
+    const sample = [
+      ["sku", "on_hand", "sales_30d", "warehouse"].join(","),
+      ["SKU-102", "120", "300", "WH-A"].join(","),
+      ["SKU-088", "900", "60", "WH-A"].join(","),
+      ["SKU-055", "40", "180", "WH-B"].join(","),
+      ["SKU-019", "0", "90", "WH-B"].join(","),
+    ].join("\n");
 
-    const header = lines[0].split(delimiter).map((h) => h.trim());
-    const data = lines.slice(1).map((line) => {
-      const cells = line.split(delimiter).map((c) => c.trim());
-      const obj: Row = {};
-      header.forEach((h, i) => (obj[h] = cells[i] ?? ""));
-      return obj;
+    const parsed = parseCSV(sample);
+    clearDemo();
+    saveUpload(parsed.headers, parsed.rows, { fileName: "sample_inventory.csv" });
+
+    setPreview({
+      headers: parsed.headers,
+      rows: parsed.rows.slice(0, 10),
+      fileName: "sample_inventory.csv",
     });
 
-    hydrate(data, header);
+    setTimeout(() => router.push("/mapping"), 250);
   }
 
-  function parsePaste(text: string) {
-    const firstLine = text.split(/\r?\n/).find((l) => l.trim().length > 0) || "";
-    const delimiter = firstLine.includes("\t") ? "\t" : ",";
-    parseDelimited(text, delimiter);
+  function downloadSampleCSV() {
+    const sample = [
+      ["sku", "on_hand", "sales_30d", "warehouse"].join(","),
+      ["SKU-102", "120", "300", "WH-A"].join(","),
+      ["SKU-088", "900", "60", "WH-A"].join(","),
+      ["SKU-055", "40", "180", "WH-B"].join(","),
+      ["SKU-019", "0", "90", "WH-B"].join(","),
+    ].join("\n");
+
+    const blob = new Blob([sample], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sample_inventory.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
-  function parseCSV(text: string) {
-    parseDelimited(text, ",");
-  }
-
-  function onUsePasted() {
-    setError("");
-    try {
-      parsePaste(pasted);
-    } catch (e: any) {
-      setError(e?.message || "Failed to parse pasted data");
-    }
-  }
-
-  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setError("");
-    const f = e.target.files?.[0];
-    if (!f) return;
-
-    if (!f.name.toLowerCase().endsWith(".csv")) {
-      setError("Please upload a .csv file");
-      return;
-    }
-
-    setFileName(f.name);
-
-    try {
-      const text = await f.text();
-      parseCSV(text);
-    } catch (err: any) {
-      setError(err?.message || "Failed to parse CSV");
-    }
-  }
-
-  const hasData = rows.length > 0;
+  const headerCount = preview?.headers.length ?? 0;
+  const rowCount = preview?.rows.length ?? 0;
 
   return (
-    <main style={S.page}>
-      {/* Top thin bar */}
-      <div style={S.topBar}>
-        <div style={S.brand}>Inventory Decision Engine</div>
-        <Link href="/" style={S.topLink}>← Home</Link>
-      </div>
-
-      <div style={S.container}>
-        <div style={S.titleRow}>
-          <div>
-            <h1 style={S.h1}>Data Input</h1>
-            <p style={S.subtitle}>
-              For companies: fastest option is <b>Paste from Excel</b>. CSV is optional.
-            </p>
-          </div>
-        </div>
-
-        <div style={S.card}>
-          {/* Tabs */}
-          <div style={S.tabsWrap}>
-            <Tab active={mode === "paste"} onClick={() => setMode("paste")}>Paste Table</Tab>
-            <Tab active={mode === "upload"} onClick={() => setMode("upload")}>Upload CSV</Tab>
-            <Tab active={mode === "connect"} onClick={() => setMode("connect")}>Connect (soon)</Tab>
-          </div>
-
-          <div style={S.hint}>{hint}</div>
-
-          {/* Paste */}
-          {mode === "paste" && (
-            <div style={{ marginTop: 14 }}>
-              <div style={S.rowBetween}>
-                <div style={S.helpText}>
-                  <div style={{ fontWeight: 900, color: "#0f172a" }}>How:</div>
-                  <div style={{ marginTop: 4 }}>
-                    افتحي Excel → حددي الجدول كله → Copy → Paste هنا.
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
-                    Works with Excel copy (tab-separated) or comma-separated.
-                  </div>
-                </div>
-
-                <button style={S.primaryBtn} onClick={onUsePasted}>
-                  Use Pasted Data
-                </button>
+    <div style={styles.wrap}>
+      {/* Premium background */}
+      <div className="bg-breathe" style={{ minHeight: "100vh" }}>
+        <div style={styles.container}>
+          {/* Topbar */}
+          <div className="anim-in anim-delay-1" style={styles.topbar}>
+            <div style={styles.brand}>
+              <div style={styles.logo} />
+              <div>
+                <div style={styles.title}>Inventory Decision Engine</div>
+                <div style={styles.subtitle}>Demo • Upload → Map Columns → Results</div>
               </div>
-
-              <textarea
-                value={pasted}
-                onChange={(e) => setPasted(e.target.value)}
-                placeholder={`sku\ton_hand\tavg_daily_sales\nABC-01\t120\t6\nABC-02\t10\t3`}
-                style={S.textarea}
-              />
             </div>
-          )}
 
-          {/* Upload */}
-          {mode === "upload" && (
-            <div style={{ marginTop: 14 }}>
-              <div style={S.rowBetween}>
-                <div style={S.helpText}>
-                  <div style={{ fontWeight: 900, color: "#0f172a" }}>Upload CSV</div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
-                    We'll parse it and store it for the Results page.
-                  </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <a href="/" style={styles.link}>
+                Home
+              </a>
+              <button
+                className="btn-glow"
+                style={styles.btnGhost}
+                onClick={downloadSampleCSV}
+                type="button"
+              >
+                Download sample CSV
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.hero}>
+            {/* Left: Instructions + Dropzone */}
+            <div className="anim-in anim-delay-2" style={styles.cardPad}>
+              <span style={styles.pill}>⚡ Demo Upload</span>
+              <h1 style={styles.h1}>Upload your inventory CSV</h1>
+              <p style={styles.p}>
+                Minimum required fields: <b style={{ color: "#e6e8ee" }}>SKU</b>,{" "}
+                <b style={{ color: "#e6e8ee" }}>On Hand</b>,{" "}
+                <b style={{ color: "#e6e8ee" }}>Sales (30d)</b>.
+                <br />
+                Warehouse is optional (you can still map it).
+              </p>
+
+              <div
+                style={styles.drop}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files?.[0] ?? null;
+                  void handleFile(file);
+                }}
+              >
+                <div style={styles.dropTitle}>
+                  {busy ? "Reading file..." : "Drag & drop your CSV here"}
+                </div>
+                <div style={styles.hint}>
+                  Or click “Choose file”. We’ll take you to column mapping next.
                 </div>
 
-                <label style={S.uploadBtn}>
-                  Select CSV File
-                  <input type="file" accept=".csv" onChange={onFileChange} style={{ display: "none" }} />
-                </label>
+                <div style={styles.row}>
+                  <button
+                    className="btn-glow"
+                    style={styles.btnPrimary}
+                    type="button"
+                    onClick={() => inputRef.current?.click()}
+                    disabled={busy}
+                  >
+                    Choose file
+                  </button>
+
+                  <button
+                    className="btn-glow"
+                    style={styles.btnGhost}
+                    type="button"
+                    onClick={useSampleData}
+                    disabled={busy}
+                  >
+                    Use sample data
+                  </button>
+
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    style={{ display: "none" }}
+                    onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
+                  />
+                </div>
               </div>
 
-              {fileName && (
-                <div style={{ marginTop: 10, color: "#334155" }}>
-                  Uploaded: <b>{fileName}</b>
+              {error ? <div style={styles.error}>{error}</div> : null}
+
+              <div style={styles.footerNote}>
+                Privacy: Demo stores data in your browser session only (no server save).
+              </div>
+            </div>
+
+            {/* Right: Preview */}
+            <div className="hover-lift anim-in anim-delay-3" style={styles.cardPad}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                <div style={{ fontWeight: 950, fontSize: 18 }}>Preview</div>
+                <div style={{ fontSize: 12, color: "#aab1c4" }}>
+                  {preview?.fileName ? preview.fileName : "No file yet"}
+                </div>
+              </div>
+
+              <div style={styles.kpiGrid}>
+                <div style={styles.kpi}>
+                  <div style={styles.kpiTitle}>Detected columns</div>
+                  <div style={styles.kpiValue}>{headerCount || "—"}</div>
+                </div>
+                <div style={styles.kpi}>
+                  <div style={styles.kpiTitle}>Preview rows</div>
+                  <div style={styles.kpiValue}>{rowCount || "—"}</div>
+                </div>
+                <div style={styles.kpi}>
+                  <div style={styles.kpiTitle}>Next step</div>
+                  <div style={styles.kpiValue}>Mapping</div>
+                </div>
+              </div>
+
+              {!preview ? (
+                <div style={{ marginTop: 14, color: "#b7bed1", lineHeight: 1.7 }}>
+                  Upload a CSV to see a preview of the first rows before mapping.
+                </div>
+              ) : (
+                <div style={styles.tableWrap}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        {preview.headers.slice(0, 6).map((h) => (
+                          <th key={h} style={styles.th}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.map((r, idx) => (
+                        <tr key={idx} style={styles.tr}>
+                          {preview.headers.slice(0, 6).map((h) => (
+                            <td key={h} style={styles.td}>
+                              {r[h] ?? ""}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div style={styles.footerNote}>
+                    Showing first 10 rows and first 6 columns (for speed).
+                  </div>
                 </div>
               )}
             </div>
-          )}
+          </div>
 
-          {/* Connect soon */}
-          {mode === "connect" && (
-            <div style={S.soonBox}>
-              <div style={{ fontWeight: 900, fontSize: 16, color: "#0f172a" }}>
-                Connect data sources (coming next)
-              </div>
-              <div style={{ marginTop: 8, color: "#475569", lineHeight: 1.7 }}>
-                • Google Sheets link<br />
-                • API / ERP connector<br />
-                • SQL connection
-              </div>
-              <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
-                v1 covers most companies with Paste + Upload.
-              </div>
-            </div>
-          )}
+          {/* Global styles (same vibe as landing) */}
+          <style jsx global>{`
+            .bg-breathe {
+              background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
+                radial-gradient(900px 500px at 90% 20%, rgba(167, 139, 250, 0.1), transparent 60%),
+                linear-gradient(180deg, #0f1630, #0b0f1a);
+              background-size: 140% 140%;
+              animation: breathe 14s ease-in-out infinite;
+            }
 
-          {/* Error */}
-          {error && <div style={S.errorBox}>{error}</div>}
+            @keyframes breathe {
+              0%,
+              100% {
+                background-position: 0% 0%, 100% 0%, 50% 50%;
+              }
+              50% {
+                background-position: 10% 8%, 92% 12%, 50% 50%;
+              }
+            }
 
-          {/* Preview */}
-          {hasData && (
-            <div style={{ marginTop: 18 }}>
-              <div style={S.previewHeader}>
-                <div style={{ fontWeight: 900, color: "#0f172a" }}>
-                  Preview <span style={{ color: "#64748b", fontWeight: 700 }}>({rows.length} rows)</span>
-                </div>
+            .anim-in {
+              opacity: 0;
+              transform: translateY(10px);
+              animation: fadeUp 650ms ease-out forwards;
+            }
 
-                <Link href="/results" style={S.goBtn}>
-                  Go to Results →
-                </Link>
-              </div>
+            .anim-delay-1 {
+              animation-delay: 80ms;
+            }
+            .anim-delay-2 {
+              animation-delay: 160ms;
+            }
+            .anim-delay-3 {
+              animation-delay: 240ms;
+            }
 
-              <div style={S.tableWrap}>
-                <table style={S.table}>
-                  <thead>
-                    <tr>
-                      {columns.map((c) => (
-                        <th key={c} style={S.th}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 15).map((r, idx) => (
-                      <tr key={idx} style={{ borderTop: "1px solid #eef2f7" }}>
-                        {columns.map((c) => (
-                          <td key={c} style={S.td}>{r[c]}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            @keyframes fadeUp {
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
 
-              <div style={{ marginTop: 8, color: "#64748b", fontSize: 12 }}>
-                Showing first 15 rows only.
-              </div>
-            </div>
-          )}
-        </div>
+            .hover-lift {
+              transition: transform 200ms ease, box-shadow 200ms ease;
+            }
+            .hover-lift:hover {
+              transform: translateY(-4px);
+              box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+            }
 
-        <div style={S.footer}>
-          <div>Tip: Paste from Excel = best UX for companies.</div>
+            .btn-glow {
+              transition: transform 150ms ease, filter 150ms ease;
+            }
+            .btn-glow:hover {
+              transform: translateY(-1px);
+              filter: drop-shadow(0 10px 20px rgba(110, 231, 255, 0.2));
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+              .anim-in,
+              .bg-breathe,
+              .hover-lift,
+              .btn-glow {
+                animation: none !important;
+                transition: none !important;
+                transform: none !important;
+                opacity: 1 !important;
+              }
+            }
+          `}</style>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
-
-/* ---------------- UI ---------------- */
-
-function Tab({ active, onClick, children }: { active: boolean; onClick: () => void; children: any }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        ...S.tab,
-        ...(active ? S.tabActive : {}),
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-const S: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    background: "#f6f9ff",
-    fontFamily: "system-ui",
-  },
-  topBar: {
-    height: 56,
-    background: "white",
-    borderBottom: "1px solid #eaf0ff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "0 18px",
-  },
-  brand: { fontWeight: 900, color: "#0f172a" },
-  topLink: { color: "#0f172a", textDecoration: "none", fontWeight: 700, fontSize: 13 },
-
-  container: {
-    maxWidth: 1100,
-    margin: "0 auto",
-    padding: "26px 18px",
-  },
-  titleRow: {
-    textAlign: "center",
-    marginBottom: 14,
-  },
-  h1: {
-    margin: 0,
-    fontSize: 34,
-    fontWeight: 900,
-    color: "#0f172a",
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    margin: "10px auto 0",
-    maxWidth: 720,
-    color: "#475569",
-    lineHeight: 1.5,
-  },
-
-  card: {
-    background: "white",
-    border: "1px solid #eaf0ff",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 10px 34px rgba(15, 23, 42, 0.06)",
-  },
-
-  tabsWrap: {
-    display: "flex",
-    gap: 8,
-    padding: 6,
-    borderRadius: 16,
-    background: "#f1f5ff",
-    width: "fit-content",
-    margin: "0 auto",
-    border: "1px solid #eaf0ff",
-  },
-  tab: {
-    border: "1px solid transparent",
-    background: "transparent",
-    padding: "10px 14px",
-    borderRadius: 14,
-    fontWeight: 900,
-    cursor: "pointer",
-    color: "#334155",
-  },
-  tabActive: {
-    background: "white",
-    border: "1px solid #eaf0ff",
-    boxShadow: "0 2px 10px rgba(15, 23, 42, 0.06)",
-    color: "#0f172a",
-  },
-
-  hint: {
-    marginTop: 14,
-    color: "#64748b",
-    fontSize: 13,
-    textAlign: "center",
-  },
-
-  rowBetween: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    flexWrap: "wrap",
-    marginTop: 10,
-  },
-
-  helpText: {
-    color: "#475569",
-    lineHeight: 1.5,
-    maxWidth: 560,
-  },
-
-  primaryBtn: {
-    padding: "12px 16px",
-    borderRadius: 999,
-    background: "#0f172a",
-    color: "white",
-    border: "none",
-    cursor: "pointer",
-    fontWeight: 900,
-    boxShadow: "0 10px 20px rgba(15, 23, 42, 0.18)",
-  },
-
-  uploadBtn: {
-    display: "inline-block",
-    padding: "12px 16px",
-    borderRadius: 999,
-    background: "#0f172a",
-    color: "white",
-    fontWeight: 900,
-    cursor: "pointer",
-    boxShadow: "0 10px 20px rgba(15, 23, 42, 0.18)",
-  },
-
-  textarea: {
-    marginTop: 12,
-    width: "100%",
-    minHeight: 220,
-    padding: 14,
-    borderRadius: 18,
-    border: "1px solid #eaf0ff",
-    background: "#fbfdff",
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    fontSize: 13,
-    lineHeight: 1.55,
-    outline: "none",
-    boxShadow: "inset 0 1px 0 rgba(15, 23, 42, 0.02)",
-  },
-
-  soonBox: {
-    marginTop: 14,
-    padding: 14,
-    borderRadius: 18,
-    border: "1px dashed #c7d2fe",
-    background: "#f8faff",
-  },
-
-  errorBox: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 18,
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
-    color: "#991b1b",
-    fontWeight: 900,
-  },
-
-  previewHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-    marginBottom: 10,
-  },
-
-  goBtn: {
-    padding: "10px 14px",
-    borderRadius: 14,
-    background: "#0f172a",
-    color: "white",
-    textDecoration: "none",
-    fontWeight: 900,
-    fontSize: 13,
-  },
-
-  tableWrap: {
-    overflow: "auto",
-    border: "1px solid #eef2f7",
-    borderRadius: 18,
-  },
-  table: { width: "100%", borderCollapse: "collapse" },
-  th: {
-    textAlign: "left",
-    padding: "12px 12px",
-    background: "#f8fafc",
-    fontSize: 12,
-    color: "#334155",
-    borderBottom: "1px solid #eef2f7",
-    position: "sticky",
-    top: 0,
-  },
-  td: {
-    padding: "12px 12px",
-    fontSize: 13,
-    color: "#0f172a",
-    whiteSpace: "nowrap",
-  },
-
-  footer: {
-    marginTop: 12,
-    textAlign: "center",
-    fontSize: 12,
-    color: "#94a3b8",
-  },
-};
