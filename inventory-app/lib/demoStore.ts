@@ -298,12 +298,25 @@ export type MovementsMapping = {
   uom?: string;
 };
 
+/**
+ * NEW: Mapping for movement type VALUES (what "IN" vs "OUT" means)
+ * Example:
+ *  inValues: ["RECEIPT","GR","101"]
+ *  outValues: ["ISSUE","GI","201"]
+ */
+export type MovementTypeValueMapping = {
+  inValues: string[];
+  outValues: string[];
+  otherValues: string[];
+};
+
 export type DemoStateV2 = {
   datasets: Partial<Record<DatasetKey, Dataset>>;
   meta?: { createdAtISO: string };
   // Mapping for V2 flows
   mappingV2?: {
     movements?: MovementsMapping;
+    movementTypeValues?: MovementTypeValueMapping; // ✅ added
   };
 };
 
@@ -401,6 +414,105 @@ export function saveMappingV2(mapping: MovementsMapping) {
 export function loadMappingV2(): MovementsMapping | null {
   const s = readStateV2();
   return s?.mappingV2?.movements ?? null;
+}
+
+/* -------------------------------
+   V2 Mapping (Movement Type Values)  ✅ NEW
+-------------------------------- */
+
+function normToken(x: string): string {
+  return (x ?? "").toString().trim().toLowerCase();
+}
+
+function uniqueTokens(arr: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const a of arr ?? []) {
+    const t = (a ?? "").toString().trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
+}
+
+/** Conservative defaults that work for many demos. User can change later in UI. */
+export function getDefaultMovementTypeValueMapping(): MovementTypeValueMapping {
+  return {
+    inValues: ["RECEIPT", "GR", "IN", "PURCHASE", "PO_RECEIPT", "101"],
+    outValues: ["ISSUE", "GI", "OUT", "SALE", "CONSUME", "201"],
+    otherValues: ["TRANSFER", "ADJUST", "SCRAP", "RETURN", "REVERSAL"],
+  };
+}
+
+export function saveMovementTypeValueMappingV2(mapping: MovementTypeValueMapping) {
+  const s: DemoStateV2 =
+    readStateV2() ?? {
+      datasets: {},
+      meta: { createdAtISO: new Date().toISOString() },
+    };
+
+  s.mappingV2 = s.mappingV2 ?? {};
+
+  // clean + unique
+  const cleaned: MovementTypeValueMapping = {
+    inValues: uniqueTokens(mapping?.inValues ?? []),
+    outValues: uniqueTokens(mapping?.outValues ?? []),
+    otherValues: uniqueTokens(mapping?.otherValues ?? []),
+  };
+
+  s.mappingV2.movementTypeValues = cleaned;
+  writeStateV2(s);
+}
+
+export function loadMovementTypeValueMappingV2(): MovementTypeValueMapping | null {
+  const s = readStateV2();
+  return s?.mappingV2?.movementTypeValues ?? null;
+}
+
+export function loadMovementTypeValueMappingV2WithDefault(): MovementTypeValueMapping {
+  return loadMovementTypeValueMappingV2() ?? getDefaultMovementTypeValueMapping();
+}
+
+export type MovementTypeValuesValidation = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+};
+
+/** Validates that IN/OUT sets don't overlap and are not empty. */
+export function validateMovementTypeValueMapping(
+  mapping: MovementTypeValueMapping
+): MovementTypeValuesValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const ins = uniqueTokens(mapping?.inValues ?? []);
+  const outs = uniqueTokens(mapping?.outValues ?? []);
+  const others = uniqueTokens(mapping?.otherValues ?? []);
+
+  if (ins.length === 0) errors.push("IN values list is empty (you must map at least one IN/receipt value).");
+  if (outs.length === 0) errors.push("OUT values list is empty (you must map at least one OUT/issue value).");
+
+  const inSet = new Set(ins.map(normToken));
+  const outSet = new Set(outs.map(normToken));
+
+  const overlap: string[] = [];
+  for (const t of inSet) if (outSet.has(t)) overlap.push(t);
+
+  if (overlap.length > 0) {
+    errors.push(`IN/OUT lists overlap (same value in both): ${overlap.slice(0, 8).join(", ")}${overlap.length > 8 ? "..." : ""}`);
+  }
+
+  // Not an error, but good to flag
+  const otherSet = new Set(others.map(normToken));
+  let otherOverlap = 0;
+  for (const t of otherSet) if (inSet.has(t) || outSet.has(t)) otherOverlap++;
+  if (otherOverlap > 0) warnings.push("Some OTHER values also exist in IN/OUT lists. Consider removing duplicates.");
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 /* =========================================================
