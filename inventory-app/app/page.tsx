@@ -2,26 +2,11 @@
 
 import type { CSSProperties } from "react";
 
-type MetricProps = {
-  title: string;
-  value: string;
-  hint: string;
-};
-
-type PriceCardProps = {
-  name: string;
-  price: string;
-  items: string[];
-  cta: string;
-  href: string;
-  highlight?: boolean;
-};
-
 export default function Home() {
   return (
-    <main className="bg-breathe" style={mainContainerStyle}>
+    <main className="bg-breathe" style={{ fontFamily: "Arial, sans-serif", color: "#e6e8ee" }}>
       {/* Top bar */}
-      <nav
+      <div
         className="anim-in anim-delay-1"
         style={{
           maxWidth: 1080,
@@ -30,8 +15,8 @@ export default function Home() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 14,
           flexWrap: "wrap",
-          gap: 15,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -44,16 +29,12 @@ export default function Home() {
             }}
           />
           <div>
-            <div style={{ fontWeight: 800, letterSpacing: 0.2 }}>
-              Inventory Decision Engine
-            </div>
-            <div style={{ fontSize: 12, color: "#aab1c4" }}>
-              Turn a messy CSV into clear actions
-            </div>
+            <div style={{ fontWeight: 800, letterSpacing: 0.2 }}>Inventory Decision Engine</div>
+            <div style={{ fontSize: 12, color: "#aab1c4" }}>Turn a messy CSV into clear actions</div>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <a href="#pricing" style={linkStyle}>
             Pricing
           </a>
@@ -63,139 +44,279 @@ export default function Home() {
           <a
             className="btn-glow"
             href="/upload"
-            style={{
-              ...btnStyle,
-              background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
-              color: "#0b0f1a",
-            }}
+            style={{ ...btnStyle, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" }}
           >
             Try Demo
           </a>
         </div>
-      </nav>
+      </div>
 
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="anim-in anim-delay-2" style={{ padding: "58px 20px 30px" }}>
         <div
-          className="grid-responsive"
           style={{
             maxWidth: 1080,
             margin: "0 auto",
             display: "grid",
-            gap: 30,
+            gridTemplateColumns: "1.1fr 0.9fr",
+            gap: 26,
+            alignItems: "start",
           }}
+          className="hero-grid"
         >
           <div>
             <div style={pillStyle}>⚡ Inventory Decisions in Minutes</div>
-            <h1 style={{ margin: "14px 0 10px", fontSize: 40, lineHeight: 1.12, letterSpacing: -0.6 }}>
+
+            <h1 style={{ margin: "14px 0 10px", fontSize: 44, lineHeight: 1.12, letterSpacing: -0.6 }}>
               Stop guessing.
               <br />
-              Know what to reorder.
+              Know what to reorder, hold, or liquidate.
             </h1>
-            <p style={{ margin: "0 0 20px", maxWidth: 540, color: "#b7bed1", fontSize: 16, lineHeight: 1.7 }}>
-              Upload your inventory &amp; sales CSV and get a clean priority list.
+
+            <p style={{ margin: 0, maxWidth: 540, color: "#b7bed1", fontSize: 16, lineHeight: 1.7 }}>
+              Upload your inventory &amp; sales CSV and get a clean priority list:{" "}
+              <b style={{ color: "#e6e8ee" }}>stockout risk</b>, <b style={{ color: "#e6e8ee" }}>overstock</b>,{" "}
+              <b style={{ color: "#e6e8ee" }}>dead inventory</b>, and suggested actions.
             </p>
 
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap" }}>
               <a
                 className="btn-glow"
                 href="/upload"
-                style={{
-                  ...btnStyle,
-                  background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
-                  color: "#0b0f1a",
-                }}
+                style={{ ...btnStyle, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" }}
               >
                 Upload CSV (Demo)
               </a>
+              <a
+                href="#how"
+                style={{ ...btnStyle, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" }}
+              >
+                See how it works
+              </a>
+            </div>
+
+            <div style={{ marginTop: 18, display: "flex", gap: 14, flexWrap: "wrap", color: "#aab1c4", fontSize: 13 }}>
+              <span>✅ No install</span>
+              <span>✅ Works on Excel exports</span>
+              <span>✅ Built for ops + procurement</span>
             </div>
           </div>
 
           {/* Mock dashboard */}
-          <div className="hover-lift" style={{ ...cardStyle, padding: 16 }}>
-            <Metric title="Stockout Risk" value="18 SKUs" hint="Next 14 days" />
-            <div style={{ marginTop: 10 }}>
-              <Metric title="Overstock" value="42 SKUs" hint="> 90 days cover" />
+          <div className="hover-lift anim-in anim-delay-3" style={{ ...cardStyle, padding: 16, alignSelf: "start" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontWeight: 800 }}>Today’s Risk Snapshot</div>
+              <div style={{ fontSize: 12, color: "#aab1c4" }}>Demo</div>
             </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Metric title="Stockout Risk" value="18 SKUs" hint="Next 14 days" />
+              <Metric title="Overstock" value="42 SKUs" hint="> 90 days cover" />
+              <Metric title="Cash Tied" value="$12.4k" hint="Slow movers" />
+              <Metric title="Quick Wins" value="7 actions" hint="Reduce waste" />
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 14,
+                border: "1px solid #202946",
+                background: "rgba(20,27,48,0.55)",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Top Actions</div>
+              <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
+                <li>
+                  Reorder <b>SKU-102</b> (lead time 7d)
+                </li>
+                <li>
+                  Discount <b>SKU-088</b> (overstock 120d)
+                </li>
+                <li>
+                  Freeze buying <b>SKU-055</b> (low velocity)
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Proof */}
+      <section className="anim-in anim-delay-1" style={{ padding: "18px 20px 0" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto", color: "#8f97ad", fontSize: 13 }}>
+          Built for teams that deal with Excel exports, warehouses, and real constraints.
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section id="how" className="anim-in anim-delay-2" style={{ padding: "44px 20px" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+          <h2 style={{ margin: "0 0 14px", fontSize: 28 }}>How it works</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }} className="three-col">
+            <Step n="1" title="Upload" desc="Export from Excel/SAP and upload CSV." />
+            <Step n="2" title="Analyze" desc="We compute cover, velocity, risks, and actions." />
+            <Step n="3" title="Decide" desc="Get a priority list you can share immediately." />
           </div>
         </div>
       </section>
 
       {/* Pricing */}
-      <section id="pricing" style={{ padding: "60px 20px" }}>
-        <div
-          style={{
-            maxWidth: 1080,
-            margin: "0 auto",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-            gap: 20,
-          }}
-        >
-          <PriceCard
-            name="Free"
-            price="$0"
-            items={["CSV upload", "Basic flags"]}
-            cta="Try Demo"
-            href="/upload"
-          />
-          <PriceCard
-            name="Pro"
-            price="$19"
-            items={["Saved runs", "History"]}
-            cta="Soon"
-            href="#"
-            highlight
-          />
+      <section id="pricing" className="anim-in anim-delay-3" style={{ padding: "44px 20px" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+          <h2 style={{ margin: "0 0 14px", fontSize: 28 }}>Pricing</h2>
+          <p style={{ margin: "0 0 18px", color: "#b7bed1", lineHeight: 1.6 }}>
+            Start free. Upgrade when you want multi-warehouse + saved reports.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }} className="three-col">
+            <PriceCard
+              name="Free Demo"
+              price="$0"
+              note="For testing the idea"
+              items={["Upload CSV", "Basic risk flags", "Top actions list"]}
+              cta="Try Demo"
+              href="/upload"
+              highlight={false}
+            />
+            <PriceCard
+              name="Pro"
+              price="$19"
+              note="per month"
+              items={["Saved runs", "Export actions to CSV", "Filters + thresholds"]}
+              cta="Coming soon"
+              href="#"
+              highlight={true}
+            />
+            <PriceCard
+              name="Team"
+              price="$49"
+              note="per month"
+              items={["Multi-warehouse", "Roles & sharing", "Priority support"]}
+              cta="Coming soon"
+              href="#"
+              highlight={false}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="anim-in anim-delay-1" style={{ padding: "44px 20px 70px" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+          <h2 style={{ margin: "0 0 14px", fontSize: 28 }}>FAQ</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }} className="two-col">
+            <Faq q="Do I need to connect a database?" a="No. Start with CSV exports. We can add database connectors later." />
+            <Faq q="Is my data stored?" a="In the demo version, we can keep it in-memory only. Saved runs come in Pro." />
+            <Faq
+              q="What CSV format is required?"
+              a="We’ll support a simple template: SKU, on_hand, sales_30d, lead_time_days (we’ll ship a sample file)."
+            />
+            <Faq q="Can I share results with my team?" a="Yes. Pro/Team will include export and shareable links." />
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <a
+              className="btn-glow"
+              href="/upload"
+              style={{ ...btnStyle, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" }}
+            >
+              Upload CSV (Demo)
+            </a>
+          </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer
-        style={{
-          borderTop: "1px solid #1b2340",
-          padding: "30px 20px",
-          color: "#8f97ad",
-          textAlign: "center",
-        }}
-      >
-        <span>© {new Date().getFullYear()} Inventory Engine</span>
+      <footer style={{ borderTop: "1px solid #1b2340", padding: "18px 20px", color: "#8f97ad" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <span>© {new Date().getFullYear()} Inventory Decision Engine</span>
+          <span style={{ fontSize: 12 }}>Built on Next.js + Vercel</span>
+        </div>
       </footer>
 
-      {/* CSS */}
+      {/* Global styles for subtle animations + responsiveness */}
       <style jsx global>{`
-        body {
-          margin: 0;
-          padding: 0;
-          background: #0b0f1a;
-        }
         .bg-breathe {
+          background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
+            radial-gradient(900px 500px at 90% 20%, rgba(167, 139, 250, 0.1), transparent 60%),
+            linear-gradient(180deg, #0f1630, #0b0f1a);
+          background-size: 140% 140%;
+          animation: breathe 14s ease-in-out infinite;
           min-height: 100vh;
-          background: linear-gradient(180deg, #0f1630, #0b0f1a);
         }
+
+        @keyframes breathe {
+          0%,
+          100% {
+            background-position: 0% 0%, 100% 0%, 50% 50%;
+          }
+          50% {
+            background-position: 10% 8%, 92% 12%, 50% 50%;
+          }
+        }
+
         .anim-in {
           opacity: 0;
           transform: translateY(10px);
           animation: fadeUp 700ms ease-out forwards;
         }
+
+        .anim-delay-1 {
+          animation-delay: 90ms;
+        }
+        .anim-delay-2 {
+          animation-delay: 180ms;
+        }
+        .anim-delay-3 {
+          animation-delay: 260ms;
+        }
+
         @keyframes fadeUp {
           to {
             opacity: 1;
             transform: translateY(0);
           }
         }
+
         .hover-lift {
-          transition: all 250ms ease;
+          transition: transform 200ms ease, box-shadow 200ms ease;
         }
         .hover-lift:hover {
           transform: translateY(-4px);
+          box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        .btn-glow {
+          transition: transform 150ms ease, filter 150ms ease;
         }
         .btn-glow:hover {
-          filter: brightness(1.1);
+          transform: translateY(-1px);
+          filter: drop-shadow(0 10px 20px rgba(110, 231, 255, 0.2));
         }
-        @media (max-width: 850px) {
-          .grid-responsive {
+
+        /* Responsive */
+        @media (max-width: 980px) {
+          .hero-grid {
             grid-template-columns: 1fr !important;
+          }
+          .three-col {
+            grid-template-columns: 1fr !important;
+          }
+          .two-col {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .anim-in,
+          .bg-breathe,
+          .hover-lift,
+          .btn-glow {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+            opacity: 1 !important;
           }
         }
       `}</style>
@@ -203,43 +324,95 @@ export default function Home() {
   );
 }
 
-/* Components */
-function Metric({ title, value, hint }: MetricProps) {
+/* ---------- Small components (no extra libraries) ---------- */
+
+function Metric({ title, value, hint }: { title: string; value: string; hint: string }) {
   return (
-    <div style={{ padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
-      <div style={{ fontSize: 11, color: "#aab1c4" }}>{title}</div>
-      <div style={{ fontSize: 20, fontWeight: 900 }}>{value}</div>
-      <div style={{ fontSize: 11, color: "#6e778d" }}>{hint}</div>
+    <div className="hover-lift" style={{ padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
+      <div style={{ fontSize: 12, color: "#aab1c4" }}>{title}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>{value}</div>
+      <div style={{ fontSize: 12, color: "#8f97ad", marginTop: 4 }}>{hint}</div>
     </div>
   );
 }
 
-function PriceCard({ name, price, items, cta, href, highlight = false }: PriceCardProps) {
+function Step({ n, title, desc }: { n: string; title: string; desc: string }) {
+  return (
+    <div className="hover-lift" style={{ ...cardStyle, padding: 16 }}>
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 12,
+          background: "rgba(110,231,255,0.12)",
+          display: "grid",
+          placeItems: "center",
+          fontWeight: 900,
+        }}
+      >
+        {n}
+      </div>
+      <div style={{ marginTop: 10, fontWeight: 900 }}>{title}</div>
+      <div style={{ marginTop: 6, color: "#b7bed1", lineHeight: 1.6, fontSize: 14 }}>{desc}</div>
+    </div>
+  );
+}
+
+function PriceCard({
+  name,
+  price,
+  note,
+  items,
+  cta,
+  href,
+  highlight,
+}: {
+  name: string;
+  price: string;
+  note: string;
+  items: string[];
+  cta: string;
+  href: string;
+  highlight: boolean;
+}) {
   return (
     <div
+      className="hover-lift"
       style={{
         ...cardStyle,
-        padding: 25,
-        border: highlight ? "2px solid #a78bfa" : "1px solid #1b2340",
+        padding: 18,
+        border: highlight ? "1px solid rgba(167,139,250,0.55)" : cardStyle.border,
+        boxShadow: highlight ? "0 0 0 2px rgba(110,231,255,0.08)" : "none",
       }}
     >
-      <div style={{ fontSize: 20, fontWeight: 800 }}>{name}</div>
-      <div style={{ fontSize: 30, fontWeight: 900, margin: "10px 0" }}>{price}</div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 900 }}>{name}</div>
+        {highlight && <span style={pillStyle}>Most popular</span>}
+      </div>
 
-      <ul style={{ margin: "0 0 14px", paddingLeft: 18, color: "#b7bed1", lineHeight: 1.7 }}>
+      <div style={{ marginTop: 12, display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ fontSize: 34, fontWeight: 950 }}>{price}</div>
+        <div style={{ color: "#aab1c4" }}>{note}</div>
+      </div>
+
+      <ul style={{ marginTop: 12, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
         {items.map((x) => (
           <li key={x}>{x}</li>
         ))}
       </ul>
 
       <a
+        className="btn-glow"
         href={href}
         style={{
           ...btnStyle,
-          display: "block",
+          display: "inline-block",
+          marginTop: 14,
+          width: "100%",
           textAlign: "center",
-          background: highlight ? "#a78bfa" : "#1b2340",
-          color: highlight ? "#000" : "#fff",
+          background: highlight ? "linear-gradient(135deg,#6ee7ff,#a78bfa)" : "transparent",
+          color: highlight ? "#0b0f1a" : "#e6e8ee",
+          border: highlight ? "none" : "1px solid #2a3350",
           pointerEvents: href === "#" ? "none" : "auto",
           opacity: href === "#" ? 0.6 : 1,
         }}
@@ -250,16 +423,45 @@ function PriceCard({ name, price, items, cta, href, highlight = false }: PriceCa
   );
 }
 
-/* Styles */
-const mainContainerStyle: CSSProperties = { fontFamily: "sans-serif", color: "#e6e8ee" };
-const cardStyle: CSSProperties = { borderRadius: 20, border: "1px solid #1b2340", background: "rgba(18,24,43,0.8)" };
-const btnStyle: CSSProperties = { padding: "10px 20px", borderRadius: 12, fontWeight: 800, textDecoration: "none" };
-const linkStyle: CSSProperties = { color: "#b7bed1", textDecoration: "none", fontSize: 14 };
+function Faq({ q, a }: { q: string; a: string }) {
+  return (
+    <div className="hover-lift" style={{ ...cardStyle, padding: 16 }}>
+      <div style={{ fontWeight: 900 }}>{q}</div>
+      <div style={{ marginTop: 8, color: "#b7bed1", lineHeight: 1.6, fontSize: 14 }}>{a}</div>
+    </div>
+  );
+}
+
+/* ---------- Styles ---------- */
+
+const cardStyle: CSSProperties = {
+  borderRadius: 18,
+  border: "1px solid #1b2340",
+  background: "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
+};
+
+const btnStyle: CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  fontWeight: 800,
+  textDecoration: "none",
+};
+
+const linkStyle: CSSProperties = {
+  color: "#b7bed1",
+  textDecoration: "none",
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid transparent",
+};
+
 const pillStyle: CSSProperties = {
   display: "inline-block",
-  padding: "6px 14px",
-  borderRadius: 99,
+  padding: "6px 10px",
+  borderRadius: 999,
   fontSize: 12,
-  background: "rgba(110,231,255,0.1)",
-  border: "1px solid rgba(110,231,255,0.2)",
+  fontWeight: 900,
+  color: "#dfe3f1",
+  border: "1px solid rgba(110,231,255,0.25)",
+  background: "rgba(110,231,255,0.08)",
 };
