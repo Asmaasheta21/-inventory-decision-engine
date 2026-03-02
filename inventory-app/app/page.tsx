@@ -1,3 +1,4 @@
+"use client";
 export default function Home() {
   return (
     <main className="bg-breathe" style={{ fontFamily: "Arial, sans-serif", color: "#e6e8ee" }}>
