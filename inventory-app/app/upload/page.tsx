@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearDemo, saveUpload } from "@/lib/demoStore";
 import { parseTabular } from "@/lib/parseTabular";
@@ -37,14 +37,14 @@ export default function UploadPage() {
   const [conversions, setConversions] = useState<Preview | null>(null);
 
   const styles = useMemo(() => {
-    const card: CSSProperties = {
+    const card: React.CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
       background:
         "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
     };
 
-    const btn: CSSProperties = {
+    const btn: React.CSSProperties = {
       padding: "10px 14px",
       borderRadius: 12,
       fontWeight: 800,
@@ -62,13 +62,13 @@ export default function UploadPage() {
         minHeight: "100vh",
         color: "#e6e8ee",
         fontFamily: "Arial, sans-serif",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       container: {
         maxWidth: 1080,
         margin: "0 auto",
         padding: "18px 20px 60px",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       topbar: {
         display: "flex",
@@ -76,19 +76,19 @@ export default function UploadPage() {
         justifyContent: "space-between",
         gap: 12,
         marginBottom: 18,
-      } as CSSProperties,
+      } as React.CSSProperties,
 
-      brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
+      brand: { display: "flex", alignItems: "center", gap: 10 } as React.CSSProperties,
 
       logo: {
         width: 34,
         height: 34,
         borderRadius: 10,
         background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
-      title: { fontWeight: 900, letterSpacing: 0.2 } as CSSProperties,
-      subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      title: { fontWeight: 900, letterSpacing: 0.2 } as React.CSSProperties,
+      subtitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
 
       link: {
         color: "#b7bed1",
@@ -96,30 +96,30 @@ export default function UploadPage() {
         padding: "8px 10px",
         borderRadius: 10,
         border: "1px solid transparent",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       btnPrimary: {
         ...btn,
         background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
         color: "#0b0f1a",
         border: "none",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       btnGhost: {
         ...btn,
         background: "transparent",
         color: "#e6e8ee",
         border: "1px solid #2a3350",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       hero: {
         display: "grid",
         gridTemplateColumns: "1.05fr 0.95fr",
         gap: 16,
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       card,
-      cardPad: { ...card, padding: 18 } as CSSProperties,
+      cardPad: { ...card, padding: 18 } as React.CSSProperties,
 
       pill: {
         display: "inline-block",
@@ -130,32 +130,28 @@ export default function UploadPage() {
         color: "#dfe3f1",
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
-      h1: { margin: "10px 0 8px", fontSize: 28, lineHeight: 1.15 } as CSSProperties,
-      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
+      h1: { margin: "10px 0 8px", fontSize: 28, lineHeight: 1.15 } as React.CSSProperties,
+      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
 
-      grid: { display: "grid", gap: 12, marginTop: 14 } as CSSProperties,
+      grid: { display: "grid", gap: 12, marginTop: 14 } as React.CSSProperties,
 
-      slotTitle: { fontWeight: 950, fontSize: 14 } as CSSProperties,
-      slotMeta: { fontSize: 12, color: "#aab1c4", marginTop: 4 } as CSSProperties,
+      slotTitle: { fontWeight: 950, fontSize: 14 } as React.CSSProperties,
+      slotMeta: { fontSize: 12, color: "#aab1c4", marginTop: 4 } as React.CSSProperties,
 
       drop: (active: boolean) =>
         ({
           marginTop: 10,
           borderRadius: 16,
-          border: active
-            ? "1px solid rgba(110,231,255,0.55)"
-            : "1px dashed #2a3350",
-          background: active
-            ? "rgba(110,231,255,0.08)"
-            : "rgba(20,27,48,0.35)",
+          border: active ? "1px solid rgba(110,231,255,0.55)" : "1px dashed #2a3350",
+          background: active ? "rgba(110,231,255,0.08)" : "rgba(20,27,48,0.35)",
           padding: 14,
           transition: "200ms ease",
-        }) as CSSProperties,
+        }) as React.CSSProperties,
 
-      hint: { fontSize: 13, color: "#8f97ad", lineHeight: 1.6 } as CSSProperties,
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 } as CSSProperties,
+      hint: { fontSize: 13, color: "#8f97ad", lineHeight: 1.6 } as React.CSSProperties,
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 } as React.CSSProperties,
 
       error: {
         marginTop: 12,
@@ -164,7 +160,7 @@ export default function UploadPage() {
         border: "1px solid rgba(255,80,80,0.35)",
         background: "rgba(255,80,80,0.08)",
         color: "#ffd4d4",
-      } as CSSProperties,
+      } as React.CSSProperties,
 
       ok: {
         marginTop: 10,
@@ -174,15 +170,15 @@ export default function UploadPage() {
         background: "rgba(60,200,120,0.08)",
         color: "#d7ffe6",
         fontSize: 12,
-      } as CSSProperties,
+      } as React.CSSProperties,
 
-      tableWrap: { marginTop: 14, overflowX: "auto" } as CSSProperties,
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as CSSProperties,
-      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as CSSProperties,
-      tr: { background: "rgba(20,27,48,0.55)" } as CSSProperties,
-      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as CSSProperties,
+      tableWrap: { marginTop: 14, overflowX: "auto" } as React.CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
+      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as React.CSSProperties,
+      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
+      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as React.CSSProperties,
 
-      footerNote: { marginTop: 12, fontSize: 12, color: "#8f97ad" } as CSSProperties,
+      footerNote: { marginTop: 12, fontSize: 12, color: "#8f97ad" } as React.CSSProperties,
     };
   }, []);
 
@@ -226,6 +222,8 @@ export default function UploadPage() {
         fileName: file.name,
       });
 
+      // نخزن اختياريًا مؤقتًا في sessionStorage
+      // (Movements هنحفظه رسمي في demoStore عند Continue)
       sessionStorage.setItem(
         `ide_upload_${key}`,
         JSON.stringify({ headers, rows, fileName: file.name })
@@ -251,37 +249,91 @@ export default function UploadPage() {
     clearDemo();
   }
 
+  function downloadTemplateMovements() {
+    const sample = [
+      ["item_id", "date", "qty", "movement_type", "warehouse", "uom", "lot_or_batch", "expiry_date"].join(","),
+      ["SKU-102", "2026-02-01", "120", "RECEIPT", "WH-A", "PCS", "B-001", "2026-08-01"].join(","),
+      ["SKU-102", "2026-02-10", "30", "ISSUE", "WH-A", "PCS", "B-001", "2026-08-01"].join(","),
+      ["SKU-055", "2026-02-03", "40", "RECEIPT", "WH-B", "PCS", "", ""].join(","),
+    ].join("\n");
+
+    const blob = new Blob([sample], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "movements_template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadTemplateItems() {
+    const sample = [
+      ["item_id", "item_name", "category", "brand", "default_uom", "shelf_life_days"].join(","),
+      ["SKU-102", "Milk 1L", "Food", "BrandX", "PCS", "180"].join(","),
+      ["SKU-055", "T-Shirt", "Clothing", "BrandY", "PCS", ""].join(","),
+    ].join("\n");
+
+    const blob = new Blob([sample], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "items_template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadTemplateConversions() {
+    const sample = [
+      ["item_id", "from_uom", "to_uom", "factor"].join(","),
+      ["SKU-102", "CASE", "PCS", "12"].join(","),
+      ["SKU-102", "L", "ML", "1000"].join(","),
+    ].join("\n");
+
+    const blob = new Blob([sample], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "uom_conversions_template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function continueToMapping() {
     setError("");
+
     const raw = sessionStorage.getItem("ide_upload_movements");
     if (!raw) {
       setError("Movements file is required (upload Movements first).");
       return;
     }
 
-    const parsed = JSON.parse(raw) as {
-      headers: string[];
-      rows: Record<string, string>[];
-      fileName?: string;
-    };
+    const parsed = JSON.parse(raw) as { headers: string[]; rows: Record<string, string>[]; fileName?: string };
 
+    // Movements = الرسمي
     clearDemo();
-    // ✅ شلنا dataset عشان ما يطلعش error مع demoStore
-    saveUpload(parsed.headers, parsed.rows, { fileName: parsed.fileName ?? "movements" });
+    saveUpload(parsed.headers, parsed.rows, {
+      fileName: parsed.fileName ?? "movements",
+      dataset: "movements",
+    });
 
+    // Items & Conversions موجودين في sessionStorage already
     setTimeout(() => router.push("/mapping"), 200);
   }
+
+  const canContinue = !!movements;
 
   function Slot({
     keyName,
     title,
     required,
     desc,
+    onDownloadTemplate,
   }: {
     keyName: SlotKey;
     title: string;
     required?: boolean;
     desc: string;
+    onDownloadTemplate: () => void;
   }) {
     const pv = getSlotPreview(keyName);
     const active = dragOver === keyName;
@@ -296,6 +348,10 @@ export default function UploadPage() {
             </div>
             <div style={styles.slotMeta}>{desc}</div>
           </div>
+
+          <button className="btn-glow" style={styles.btnGhost} type="button" onClick={onDownloadTemplate}>
+            Template
+          </button>
         </div>
 
         <div
@@ -359,6 +415,7 @@ export default function UploadPage() {
           ) : null}
         </div>
 
+        {/* Preview table */}
         {pv ? (
           <div style={styles.tableWrap}>
             <table style={styles.table}>
@@ -383,6 +440,7 @@ export default function UploadPage() {
                 ))}
               </tbody>
             </table>
+
             <div style={styles.footerNote}>Showing first 10 rows and first 6 columns.</div>
           </div>
         ) : null}
@@ -394,17 +452,22 @@ export default function UploadPage() {
     <div style={styles.wrap}>
       <div className="bg-breathe" style={{ minHeight: "100vh" }}>
         <div style={styles.container}>
+          {/* Topbar */}
           <div className="anim-in anim-delay-1" style={styles.topbar}>
             <div style={styles.brand}>
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
-                <div style={styles.subtitle}>Upload Movements (required) → Mapping → Results</div>
+                <div style={styles.subtitle}>
+                  Upload Movements (required) + Optional datasets → Map Columns → Results
+                </div>
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <a href="/" style={styles.link}>Home</a>
+              <a href="/" style={styles.link}>
+                Home
+              </a>
               <button className="btn-glow" style={styles.btnGhost} type="button" onClick={resetAll}>
                 Reset
               </button>
@@ -413,8 +476,8 @@ export default function UploadPage() {
                 style={styles.btnPrimary}
                 type="button"
                 onClick={continueToMapping}
-                disabled={!movements || !!busyKey}
-                title={!movements ? "Upload Movements first" : "Continue"}
+                disabled={!canContinue || !!busyKey}
+                title={!canContinue ? "Upload Movements first" : "Continue"}
               >
                 Continue → Mapping
               </button>
@@ -422,6 +485,7 @@ export default function UploadPage() {
           </div>
 
           <div style={styles.hero}>
+            {/* Left: Uploads */}
             <div className="anim-in anim-delay-2" style={styles.cardPad}>
               <span style={styles.pill}>⚡ Multi Upload</span>
               <h1 style={styles.h1}>Upload your datasets</h1>
@@ -432,57 +496,59 @@ export default function UploadPage() {
                 Movements is required. Items & Conversions are optional.
               </p>
 
-              <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+              <div style={styles.grid}>
                 <Slot
                   keyName="movements"
                   title="Movements"
                   required
                   desc="Each row = a stock movement (receipt/issue/transfer/adjust/scrap)."
+                  onDownloadTemplate={downloadTemplateMovements}
                 />
+
                 <Slot
                   keyName="items"
                   title="Items (optional)"
                   desc="Item master (name/category/default_uom/shelf_life_days)."
+                  onDownloadTemplate={downloadTemplateItems}
                 />
+
                 <Slot
                   keyName="conversions"
                   title="UOM Conversions (optional)"
                   desc="Unit conversions per item (CASE→PCS, L→ML, …)."
+                  onDownloadTemplate={downloadTemplateConversions}
                 />
               </div>
 
               {error ? <div style={styles.error}>{error}</div> : null}
 
               <div style={styles.footerNote}>
-                Optional datasets are stored in your browser session (sessionStorage).
+                Note: In this demo, optional datasets are stored in your browser (sessionStorage).
               </div>
             </div>
 
+            {/* Right: Status */}
             <div className="hover-lift anim-in anim-delay-3" style={styles.cardPad}>
               <div style={{ fontWeight: 950, fontSize: 18 }}>Status</div>
               <div style={{ marginTop: 12, color: "#b7bed1", lineHeight: 1.7 }}>
                 <div>
-                  Movements:{" "}
-                  <b style={{ color: movements ? "#d7ffe6" : "#ffd4d4" }}>
-                    {movements ? "Loaded" : "Required"}
-                  </b>
+                  Movements: <b style={{ color: movements ? "#d7ffe6" : "#ffd4d4" }}>{movements ? "Loaded" : "Required"}</b>
                 </div>
                 <div>
-                  Items:{" "}
-                  <b style={{ color: items ? "#d7ffe6" : "#aab1c4" }}>
-                    {items ? "Loaded" : "Optional"}
-                  </b>
+                  Items: <b style={{ color: items ? "#d7ffe6" : "#aab1c4" }}>{items ? "Loaded" : "Optional"}</b>
                 </div>
                 <div>
-                  Conversions:{" "}
-                  <b style={{ color: conversions ? "#d7ffe6" : "#aab1c4" }}>
-                    {conversions ? "Loaded" : "Optional"}
-                  </b>
+                  Conversions: <b style={{ color: conversions ? "#d7ffe6" : "#aab1c4" }}>{conversions ? "Loaded" : "Optional"}</b>
+                </div>
+
+                <div style={{ marginTop: 14, fontSize: 12, color: "#8f97ad" }}>
+                  Next: you’ll map columns + map movement type values to standard types.
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Global styles */}
           <style jsx global>{`
             .bg-breathe {
               background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
@@ -492,24 +558,53 @@ export default function UploadPage() {
               animation: breathe 14s ease-in-out infinite;
             }
             @keyframes breathe {
-              0%,100% { background-position: 0% 0%, 100% 0%, 50% 50%; }
-              50% { background-position: 10% 8%, 92% 12%, 50% 50%; }
+              0%,
+              100% {
+                background-position: 0% 0%, 100% 0%, 50% 50%;
+              }
+              50% {
+                background-position: 10% 8%, 92% 12%, 50% 50%;
+              }
             }
             .anim-in {
               opacity: 0;
               transform: translateY(10px);
               animation: fadeUp 650ms ease-out forwards;
             }
-            .anim-delay-1 { animation-delay: 80ms; }
-            .anim-delay-2 { animation-delay: 160ms; }
-            .anim-delay-3 { animation-delay: 240ms; }
-            @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
-            .hover-lift { transition: transform 200ms ease, box-shadow 200ms ease; }
-            .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 15px 40px rgba(0,0,0,0.35); }
-            .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
-            .btn-glow:hover { transform: translateY(-1px); filter: drop-shadow(0 10px 20px rgba(110,231,255,0.2)); }
+            .anim-delay-1 {
+              animation-delay: 80ms;
+            }
+            .anim-delay-2 {
+              animation-delay: 160ms;
+            }
+            .anim-delay-3 {
+              animation-delay: 240ms;
+            }
+            @keyframes fadeUp {
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            .hover-lift {
+              transition: transform 200ms ease, box-shadow 200ms ease;
+            }
+            .hover-lift:hover {
+              transform: translateY(-4px);
+              box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+            }
+            .btn-glow {
+              transition: transform 150ms ease, filter 150ms ease;
+            }
+            .btn-glow:hover {
+              transform: translateY(-1px);
+              filter: drop-shadow(0 10px 20px rgba(110, 231, 255, 0.2));
+            }
             @media (prefers-reduced-motion: reduce) {
-              .anim-in, .bg-breathe, .hover-lift, .btn-glow {
+              .anim-in,
+              .bg-breathe,
+              .hover-lift,
+              .btn-glow {
                 animation: none !important;
                 transition: none !important;
                 transform: none !important;
