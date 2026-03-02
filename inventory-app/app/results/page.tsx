@@ -22,6 +22,7 @@ type RowOut = {
   avgDaily: number;
   daysCover: number;
 
+  targetCover: number; // lead + safety
   reorderPoint: number;
   suggestedOrder: number;
 
@@ -50,19 +51,14 @@ export default function ResultsPage() {
   const [safetyDays, setSafetyDays] = useState<number>(initialT.safetyDays);
   const [overstockDays, setOverstockDays] = useState<number>(initialT.overstockDays);
 
-  // ✅ NEW: policy preset
-  const [preset, setPreset] = useState<
-    "CUSTOM" | "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE"
-  >("CUSTOM");
+  // UX preset buttons (optional). User still controls the numbers.
+  const [preset, setPreset] = useState<"CUSTOM" | "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE">("CUSTOM");
 
   const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
   const [decisionFilter, setDecisionFilter] = useState<Decision | "ALL">("ALL");
   const [search, setSearch] = useState<string>("");
-  const [sort, setSort] = useState<
-    "SEVERITY" | "SUGGESTED" | "COVER_ASC" | "COVER_DESC"
-  >("SEVERITY");
+  const [sort, setSort] = useState<"SEVERITY" | "SUGGESTED" | "COVER_ASC" | "COVER_DESC">("SEVERITY");
 
-  // ✅ UX: expand row to show extra tips
   const [expandedRowKey, setExpandedRowKey] = useState<string | null>(null);
 
   const styles = useMemo(() => {
@@ -70,7 +66,8 @@ export default function ResultsPage() {
       borderRadius: 18,
       border: "1px solid #1b2340",
       background:
-        "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
+        "linear-gradient(180deg, rgba(18,24,43,0.88), rgba(12,16,28,0.88))",
+      boxShadow: "0 18px 60px rgba(0,0,0,0.35)",
     };
 
     const btnBase: CSSProperties = {
@@ -100,7 +97,7 @@ export default function ResultsPage() {
     };
 
     return {
-      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
+      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Inter, Arial, sans-serif" } as CSSProperties,
       container: { maxWidth: 1180, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
 
       topbar: {
@@ -115,8 +112,8 @@ export default function ResultsPage() {
         paddingTop: 10,
         paddingBottom: 10,
         backdropFilter: "blur(10px)",
-        background: "rgba(11,15,26,0.35)",
-        borderBottom: "1px solid rgba(27,35,64,0.6)",
+        background: "rgba(11,15,26,0.42)",
+        borderBottom: "1px solid rgba(27,35,64,0.65)",
         borderRadius: 16,
       } as CSSProperties,
 
@@ -126,6 +123,7 @@ export default function ResultsPage() {
         height: 34,
         borderRadius: 10,
         background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+        boxShadow: "0 12px 30px rgba(110,231,255,0.18)",
       } as CSSProperties,
       title: { fontWeight: 950, letterSpacing: 0.2 } as CSSProperties,
       subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
@@ -182,7 +180,6 @@ export default function ResultsPage() {
       btnPrimary: { ...btnBase, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
       btnGhost: { ...btnBase, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as CSSProperties,
 
-      // ✅ UX: more readable table container
       tableWrap: {
         marginTop: 12,
         overflowX: "auto",
@@ -192,14 +189,9 @@ export default function ResultsPage() {
         padding: 10,
       } as CSSProperties,
 
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px", minWidth: 980 } as CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px", minWidth: 1080 } as CSSProperties,
 
-      // ✅ UX: sticky header
-      thead: {
-        position: "sticky",
-        top: 78,
-        zIndex: 10,
-      } as CSSProperties,
+      thead: { position: "sticky", top: 78, zIndex: 10 } as CSSProperties,
 
       th: {
         textAlign: "left",
@@ -207,7 +199,7 @@ export default function ResultsPage() {
         color: "#aab1c4",
         fontWeight: 900,
         padding: "10px 10px",
-        background: "rgba(11,15,26,0.85)",
+        background: "rgba(11,15,26,0.88)",
         borderTop: "1px solid rgba(32,41,70,0.8)",
         borderBottom: "1px solid rgba(32,41,70,0.8)",
       } as CSSProperties,
@@ -216,12 +208,6 @@ export default function ResultsPage() {
         background: "rgba(20,27,48,0.55)",
         cursor: "pointer",
         transition: "transform 140ms ease, box-shadow 140ms ease, background 140ms ease",
-      } as CSSProperties,
-
-      trHover: {
-        background: "rgba(20,27,48,0.72)",
-        boxShadow: "0 10px 26px rgba(0,0,0,0.28)",
-        transform: "translateY(-1px)",
       } as CSSProperties,
 
       td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0", verticalAlign: "top" } as CSSProperties,
@@ -239,13 +225,13 @@ export default function ResultsPage() {
           width: `${sev}%`,
           height: "100%",
           background:
-            sev >= 80
-              ? "rgba(255,80,80,0.70)"
-              : sev >= 60
-              ? "rgba(255,170,70,0.70)"
-              : sev >= 40
-              ? "rgba(167,139,250,0.70)"
-              : "rgba(110,231,255,0.70)",
+            sev >= 85
+              ? "rgba(255,80,80,0.75)"
+              : sev >= 65
+              ? "rgba(255,170,70,0.75)"
+              : sev >= 45
+              ? "rgba(167,139,250,0.75)"
+              : "rgba(110,231,255,0.75)",
         } as CSSProperties),
 
       muted: { fontSize: 12, color: "#8f97ad", lineHeight: 1.4 } as CSSProperties,
@@ -263,18 +249,11 @@ export default function ResultsPage() {
       lockTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 } as CSSProperties,
       lockTitle: { fontWeight: 950 } as CSSProperties,
 
-      blur: { filter: "blur(6px)", opacity: 0.75 } as CSSProperties,
+      blur: { filter: "blur(6px)", opacity: 0.78 } as CSSProperties,
 
       lockBtn: { ...btnBase, background: "linear-gradient(135deg,#a78bfa,#6ee7ff)", color: "#0b0f1a" } as CSSProperties,
 
-      // ✅ UX: legend row
-      legendRow: {
-        display: "flex",
-        gap: 8,
-        flexWrap: "wrap",
-        marginTop: 12,
-        alignItems: "center",
-      } as CSSProperties,
+      legendRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "center" } as CSSProperties,
     };
   }, []);
 
@@ -310,11 +289,12 @@ export default function ResultsPage() {
   });
 
   const kpi = computeKPIs(allRows);
+  const targetCover = leadTimeDays + safetyDays;
 
-  // ✅ NEW: presets handlers
   function applyPreset(p: "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE") {
     setPreset(p);
 
+    // Presets simply set numbers (user can still change them -> CUSTOM)
     if (p === "CONSERVATIVE") {
       setLeadTimeDays(14);
       setSafetyDays(14);
@@ -327,7 +307,6 @@ export default function ResultsPage() {
       setOverstockDays(90);
       return;
     }
-    // AGGRESSIVE
     setLeadTimeDays(7);
     setSafetyDays(5);
     setOverstockDays(120);
@@ -352,6 +331,8 @@ export default function ResultsPage() {
       "sales_30d",
       "avg_daily",
       "days_cover",
+      "target_cover",
+      "reorder_point",
       "reason",
     ];
     const lines = [header.join(",")];
@@ -368,6 +349,8 @@ export default function ResultsPage() {
           r.sales30d.toString(),
           round2(r.avgDaily).toString(),
           round2(r.daysCover).toString(),
+          r.targetCover.toString(),
+          round2(r.reorderPoint).toString(),
           csvSafe(r.reason),
         ].join(",")
       );
@@ -396,7 +379,7 @@ export default function ResultsPage() {
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
-                <div style={styles.subtitle}>Senior Ops Control • Demo</div>
+                <div style={styles.subtitle}>Ops-grade actions • Policy-driven (Lead/Safety/Overstock)</div>
               </div>
             </div>
 
@@ -414,22 +397,23 @@ export default function ResultsPage() {
                 <div>
                   <h1 style={styles.h1}>Ops Control Panel</h1>
                   <p style={styles.p}>
-                    Prioritized actions using lead time, safety days, cover, slow movers, and zero-sales detection.
+                    Actions are calculated using your policy: Lead Time + Safety Days → Target Cover ({targetCover}d).
                   </p>
                 </div>
+
                 <span style={styles.badge(kpi.alertScore >= 70 ? "red" : kpi.alertScore >= 45 ? "amber" : "cyan")}>
                   Alert Score: {kpi.alertScore}/100
                 </span>
               </div>
 
               <div style={styles.kpiGrid}>
-                <KPI title="Immediate Order" value={kpi.orderNow} sub="Likely stockout before lead time" styles={styles} />
-                <KPI title="Watchlist" value={kpi.watch} sub="Close to reorder point" styles={styles} />
-                <KPI title="Reduce / Promo" value={kpi.reduce} sub="Overstock / slow movers" styles={styles} />
-                <KPI title="Dead Stock" value={kpi.dead} sub="No sales + stock present" styles={styles} />
+                <KPI title="Order Now" value={kpi.orderNow} sub="Stockout before lead time" styles={styles} />
+                <KPI title="Watch" value={kpi.watch} sub={`Below target cover (${targetCover}d)`} styles={styles} />
+                <KPI title="Reduce" value={kpi.reduce} sub={`Overstock above ${overstockDays}d cover`} styles={styles} />
+                <KPI title="Dead" value={kpi.dead} sub="No sales + stock exists" styles={styles} />
               </div>
 
-              {/* ✅ UX: Legend */}
+              {/* Legend */}
               <div style={styles.legendRow}>
                 <span style={styles.muted}>Legend:</span>
                 <span style={decisionBadge(styles, "ORDER_NOW")}>ORDER_NOW</span>
@@ -437,10 +421,10 @@ export default function ResultsPage() {
                 <span style={decisionBadge(styles, "REDUCE")}>REDUCE</span>
                 <span style={decisionBadge(styles, "DEAD")}>DEAD</span>
                 <span style={decisionBadge(styles, "HEALTHY")}>HEALTHY</span>
-                <span style={styles.muted}>• Click any row to expand tips</span>
+                <span style={styles.muted}>• Click a row to expand actionable tips</span>
               </div>
 
-              {/* ✅ NEW: Presets UI */}
+              {/* Presets */}
               <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={styles.badge("violet")}>Policy Presets</span>
 
@@ -450,9 +434,7 @@ export default function ResultsPage() {
                   style={{
                     ...styles.btnGhost,
                     border:
-                      preset === "CONSERVATIVE"
-                        ? "1px solid rgba(110,231,255,0.55)"
-                        : (styles.btnGhost as any).border,
+                      preset === "CONSERVATIVE" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("CONSERVATIVE")}
                 >
@@ -465,9 +447,7 @@ export default function ResultsPage() {
                   style={{
                     ...styles.btnGhost,
                     border:
-                      preset === "BALANCED"
-                        ? "1px solid rgba(110,231,255,0.55)"
-                        : (styles.btnGhost as any).border,
+                      preset === "BALANCED" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("BALANCED")}
                 >
@@ -480,9 +460,7 @@ export default function ResultsPage() {
                   style={{
                     ...styles.btnGhost,
                     border:
-                      preset === "AGGRESSIVE"
-                        ? "1px solid rgba(110,231,255,0.55)"
-                        : (styles.btnGhost as any).border,
+                      preset === "AGGRESSIVE" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("AGGRESSIVE")}
                 >
@@ -501,13 +479,14 @@ export default function ResultsPage() {
                   <input
                     style={styles.input}
                     type="number"
+                    min={0}
                     value={leadTimeDays}
                     onChange={(e) => {
                       onManualChange();
                       setLeadTimeDays(Number(e.target.value));
                     }}
                   />
-                  <div style={styles.muted}>Used to predict stockout risk window.</div>
+                  <div style={styles.muted}>How long replenishment takes to arrive.</div>
                 </div>
 
                 <div style={styles.box}>
@@ -515,13 +494,14 @@ export default function ResultsPage() {
                   <input
                     style={styles.input}
                     type="number"
+                    min={0}
                     value={safetyDays}
                     onChange={(e) => {
                       onManualChange();
                       setSafetyDays(Number(e.target.value));
                     }}
                   />
-                  <div style={styles.muted}>Buffers demand uncertainty (simple).</div>
+                  <div style={styles.muted}>Buffer for variability and uncertainty.</div>
                 </div>
 
                 <div style={styles.box}>
@@ -529,13 +509,14 @@ export default function ResultsPage() {
                   <input
                     style={styles.input}
                     type="number"
+                    min={1}
                     value={overstockDays}
                     onChange={(e) => {
                       onManualChange();
                       setOverstockDays(Number(e.target.value));
                     }}
                   />
-                  <div style={styles.muted}>If cover is huge → reduce / freeze buying.</div>
+                  <div style={styles.muted}>Above this → reduce / freeze buying.</div>
                 </div>
               </div>
 
@@ -547,7 +528,7 @@ export default function ResultsPage() {
                     style={styles.input}
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="e.g. SKU-102"
+                    placeholder="e.g. SKU00058"
                   />
                 </div>
 
@@ -594,7 +575,7 @@ export default function ResultsPage() {
 
               <div style={styles.row}>
                 <button className="btn-glow" style={styles.btnGhost} onClick={saveT} type="button">
-                  Save thresholds
+                  Save Policy
                 </button>
                 <button className="btn-glow" style={styles.btnPrimary} onClick={exportCSV} type="button">
                   Export Action Queue (CSV)
@@ -616,12 +597,13 @@ export default function ResultsPage() {
                       <th style={styles.th}>Suggested</th>
                       <th style={styles.th}>On Hand</th>
                       <th style={styles.th}>Sales 30d</th>
-                      <th style={styles.th}>Days Cover</th>
-                      <th style={styles.th}>Reason + Tip</th>
+                      <th style={styles.th}>Cover (days)</th>
+                      <th style={styles.th}>Reason + Next step</th>
                     </tr>
                   </thead>
+
                   <tbody>
-                    {sorted.slice(0, 250).map((r, idx) => {
+                    {sorted.slice(0, 250).map((r) => {
                       const key = rowKey(r);
                       const expanded = expandedRowKey === key;
 
@@ -639,6 +621,7 @@ export default function ResultsPage() {
                             <td style={styles.td}>
                               <span style={decisionBadge(styles, r.decision)}>{r.decision}</span>
                             </td>
+
                             <td style={styles.td}>
                               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                                 <div style={{ minWidth: 44, fontWeight: 950 }}>{r.severity}</div>
@@ -647,6 +630,7 @@ export default function ResultsPage() {
                                 </div>
                               </div>
                             </td>
+
                             <td style={styles.td}>{r.suggestedOrder}</td>
                             <td style={styles.td}>{r.onHand}</td>
                             <td style={styles.td}>{r.sales30d}</td>
@@ -661,15 +645,16 @@ export default function ResultsPage() {
                             <tr key={`${key}__expanded`} style={{ background: "rgba(20,27,48,0.35)" }}>
                               <td style={{ ...styles.td }} colSpan={9}>
                                 <div style={{ display: "grid", gap: 8 }}>
-                                  <div style={{ fontWeight: 900 }}>Extra Tips</div>
+                                  <div style={{ fontWeight: 950 }}>Action Checklist</div>
                                   <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 13 }}>
-                                    {(r.tips ?? []).slice(0, 3).map((t, i) => (
+                                    {(r.tips ?? []).slice(0, 4).map((t, i) => (
                                       <li key={i}>{t}</li>
                                     ))}
                                     {(r.tips ?? []).length === 0 && <li>—</li>}
                                   </ul>
+
                                   <div style={styles.muted}>
-                                    Reorder point: {round2(r.reorderPoint)} • Avg daily: {round2(r.avgDaily)}
+                                    Target cover: {r.targetCover}d • Reorder point: {round2(r.reorderPoint)} • Avg/day: {round2(r.avgDaily)}
                                   </div>
                                 </div>
                               </td>
@@ -682,7 +667,7 @@ export default function ResultsPage() {
                 </table>
 
                 <div style={{ marginTop: 10, ...styles.muted }}>
-                  Demo note: table limited to first 250 rows for performance.
+                  Demo note: table is limited to 250 rows for performance.
                 </div>
               </div>
             </div>
@@ -699,27 +684,27 @@ export default function ResultsPage() {
               </div>
 
               <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
-                <div style={{ fontWeight: 950, marginBottom: 8 }}>Quick Recommendations</div>
+                <div style={{ fontWeight: 950, marginBottom: 8 }}>Immediate Next Steps</div>
                 <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
                   {kpi.recommendations.map((x: string) => <li key={x}>{x}</li>)}
                 </ul>
               </div>
 
-              {/* Pro locked blocks */}
+              {/* Pro placeholders */}
               <div style={styles.locked}>
                 <div style={styles.lockTop}>
                   <div>
-                    <div style={styles.lockTitle}>Pro: Multi-warehouse balancing</div>
-                    <div style={styles.muted}>Suggest transfers between warehouses + shortage prevention.</div>
+                    <div style={styles.lockTitle}>Pro: Inter-warehouse transfers</div>
+                    <div style={styles.muted}>Suggest transfers to prevent stockouts and reduce holding risk.</div>
                   </div>
                   <button className="btn-glow" style={styles.lockBtn} type="button">
                     Upgrade to Pro
                   </button>
                 </div>
                 <div style={{ marginTop: 12, ...styles.blur }}>
-                  <div style={{ fontWeight: 900 }}>Transfer Suggestions</div>
+                  <div style={{ fontWeight: 900 }}>Transfer suggestions</div>
                   <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
-                    <li>Move 120 units of SKU-088 from WH-A → WH-B (prevent stockout)</li>
+                    <li>Move 80 units from WH-A → WH-B (prevent lead-time stockout)</li>
                     <li>Consolidate slow movers to reduce holding cost</li>
                   </ul>
                 </div>
@@ -728,42 +713,21 @@ export default function ResultsPage() {
               <div style={styles.locked}>
                 <div style={styles.lockTop}>
                   <div>
-                    <div style={styles.lockTitle}>Pro: Policy-based ordering</div>
-                    <div style={styles.muted}>MOQ, case pack, service level, supplier lead-time variability.</div>
+                    <div style={styles.lockTitle}>Pro: Pack size / MOQ rules</div>
+                    <div style={styles.muted}>Round suggested orders to case packs and supplier MOQs.</div>
                   </div>
                   <button className="btn-glow" style={styles.lockBtn} type="button">
-                    Unlock Policies
+                    Unlock Rules
                   </button>
                 </div>
                 <div style={{ marginTop: 12, ...styles.blur }}>
-                  <div style={{ fontWeight: 900 }}>Recommended Policy</div>
-                  <div style={styles.muted}>
-                    (s,S) with service level 95%, dynamic safety stock, EOQ override for fast movers.
-                  </div>
-                </div>
-              </div>
-
-              <div style={styles.locked}>
-                <div style={styles.lockTop}>
-                  <div>
-                    <div style={styles.lockTitle}>Pro: Root-cause diagnostics</div>
-                    <div style={styles.muted}>Detect demand shifts, promo spikes, bad master data patterns.</div>
-                  </div>
-                  <button className="btn-glow" style={styles.lockBtn} type="button">
-                    Enable Diagnostics
-                  </button>
-                </div>
-                <div style={{ marginTop: 12, ...styles.blur }}>
-                  <div style={{ fontWeight: 900 }}>Anomalies</div>
-                  <ul style={{ margin: "8px 0 0", paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
-                    <li>SKU-055: sales spike likely promo → keep higher safety days for 2 weeks</li>
-                    <li>SKU-019: zero stock but sales present → likely stockout (lost sales)</li>
-                  </ul>
+                  <div style={{ fontWeight: 900 }}>Order rounding</div>
+                  <div style={styles.muted}>Suggested order respects MOQ, case pack, and service level.</div>
                 </div>
               </div>
 
               <div style={{ marginTop: 12, ...styles.muted }}>
-                Pro blocks are UI placeholders for now. Later we connect them to real calculations + payment.
+                Note: All actions are policy-driven using your Lead/Safety/Overstock inputs.
               </div>
             </div>
           </div>
@@ -789,19 +753,11 @@ export default function ResultsPage() {
             .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 15px 40px rgba(0,0,0,0.35); }
             .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
             .btn-glow:hover { transform: translateY(-1px); filter: drop-shadow(0 10px 20px rgba(110,231,255,0.2)); }
-
-            /* ✅ UX: row hover */
             tr.row-hoverable:hover {
               background: rgba(20,27,48,0.72) !important;
               box-shadow: 0 10px 26px rgba(0,0,0,0.28);
               transform: translateY(-1px);
             }
-
-            @media (max-width: 1050px) {
-              /* stack columns */
-              .grid-2 { grid-template-columns: 1fr !important; }
-            }
-
             @media (prefers-reduced-motion: reduce) {
               .anim-in, .bg-breathe, .hover-lift, .btn-glow {
                 animation: none !important; transition: none !important; transform: none !important; opacity: 1 !important;
@@ -818,6 +774,7 @@ export default function ResultsPage() {
 
 function buildResults(rows: Record<string, string>[], m: any, t: Thresholds): RowOut[] {
   const out: RowOut[] = [];
+  const targetCover = Math.max(0, t.leadTimeDays + t.safetyDays);
 
   for (const row of rows) {
     const sku = (row[m.sku] ?? "").toString().trim();
@@ -831,7 +788,7 @@ function buildResults(rows: Record<string, string>[], m: any, t: Thresholds): Ro
     const avgDaily = sales30d / 30;
     const daysCover = avgDaily > 0 ? onHand / avgDaily : onHand > 0 ? 9999 : 0;
 
-    const reorderPoint = avgDaily * (t.leadTimeDays + t.safetyDays);
+    const reorderPoint = avgDaily * targetCover;
     const suggestedOrder = Math.max(0, Math.round(reorderPoint - onHand));
 
     const { decision, severity, reason, tips } = classify({
@@ -851,6 +808,7 @@ function buildResults(rows: Record<string, string>[], m: any, t: Thresholds): Ro
       sales30d,
       avgDaily,
       daysCover,
+      targetCover,
       reorderPoint,
       suggestedOrder,
       decision,
@@ -864,6 +822,18 @@ function buildResults(rows: Record<string, string>[], m: any, t: Thresholds): Ro
   return out;
 }
 
+/**
+ * Premium policy-driven classifier:
+ * - ORDER_NOW if stockout before lead time
+ * - WATCH if below target cover (lead + safety)
+ * - REDUCE if overstock
+ * - DEAD if no sales + stock exists
+ *
+ * Severity is tied to:
+ * - urgency (stockout timing vs lead time)
+ * - velocity (fast movers)
+ * - units missing to reach reorder point
+ */
 function classify(x: {
   onHand: number;
   sales30d: number;
@@ -873,68 +843,130 @@ function classify(x: {
   suggestedOrder: number;
   t: Thresholds;
 }): { decision: Decision; severity: number; reason: string; tips: string[] } {
-  const { onHand, sales30d, avgDaily, daysCover, reorderPoint, t } = x;
+  const { onHand, sales30d, avgDaily, daysCover, reorderPoint, suggestedOrder, t } = x;
 
-  if (sales30d <= 0 && onHand > 0) {
-    const sev = clamp(70 + Math.min(30, onHand / 10), 0, 100);
+  const lead = Math.max(0, t.leadTimeDays);
+  const safety = Math.max(0, t.safetyDays);
+  const targetCover = lead + safety;
+  const overstockDays = Math.max(1, t.overstockDays);
+
+  const unitsMissing = Math.max(0, reorderPoint - onHand);
+  const daysToStockout = avgDaily > 0 ? daysCover : onHand > 0 ? 9999 : 0;
+
+  const fmt = (n: number) => round2(n).toString();
+
+  // A) No sales cases
+  if (sales30d <= 0) {
+    if (onHand > 0) {
+      const deadLike = onHand >= 50 || daysCover >= overstockDays;
+      const sev = clamp(Math.round(40 + Math.min(60, onHand / 8)), 0, 100);
+
+      return {
+        decision: deadLike ? "DEAD" : "REDUCE",
+        severity: sev,
+        reason: `No sales in the last 30 days while stock exists (On Hand ${onHand}). This indicates dead/slow-moving inventory risk.`,
+        tips: deadLike
+          ? [
+              "Freeze replenishment immediately.",
+              "Run a clearance plan (bundle / markdown / liquidation).",
+              "Validate data quality: is the SKU discontinued or mis-mapped?",
+              "If this is strategic inventory, manually override policy (exception handling).",
+            ]
+          : [
+              "Pause replenishment for now.",
+              "Try a small promo to validate demand.",
+              "Monitor weekly — if sales stay at 0, treat as DEAD stock.",
+            ],
+      };
+    }
+
     return {
-      decision: "DEAD",
-      severity: Math.round(sev),
-      reason: "No sales in last 30d while stock exists → dead/obsolete risk.",
-      tips: ["Freeze buying. Consider promo/bundle/return to supplier or liquidation."],
+      decision: "HEALTHY",
+      severity: 5,
+      reason: "No sales and no stock — no immediate action required.",
+      tips: ["Keep monitoring. If sales return, the engine will flag replenishment."],
     };
   }
 
+  // B) Stockout already
   if (avgDaily > 0 && onHand <= 0) {
     return {
       decision: "ORDER_NOW",
-      severity: 95,
-      reason: "Sales exist but On Hand is 0 → stockout already happening (lost sales).",
-      tips: ["Expedite replenishment. Check inbound POs and lead time accuracy."],
+      severity: 98,
+      reason: `Demand exists (Avg/day ${fmt(avgDaily)}) but On Hand is 0 — stockout is happening now (lost sales).`,
+      tips: [
+        "Expedite replenishment today (rush PO or emergency transfer).",
+        "Check inbound POs and ETA accuracy.",
+        "If lead time is unstable, increase Safety Days rather than over-ordering everything.",
+      ],
     };
   }
 
-  if (avgDaily > 0 && (daysCover < t.leadTimeDays || onHand < reorderPoint * 0.85)) {
-    const gap = Math.max(0, reorderPoint - onHand);
-    const sev = clamp(
-      70 + (t.leadTimeDays - Math.min(t.leadTimeDays, daysCover)) * 10 + gap * 0.02,
-      0,
-      100
-    );
+  // C) ORDER_NOW if stockout before lead time
+  if (daysToStockout < lead) {
+    const urgency = clamp((lead - daysToStockout) / Math.max(1, lead), 0, 1); // 0..1
+    const velocity = clamp(avgDaily / 40, 0, 1); // demo normalization
+    const shortage = clamp(unitsMissing / Math.max(1, reorderPoint), 0, 1);
+
+    const sev = clamp(Math.round(50 + urgency * 35 + velocity * 10 + shortage * 15), 0, 100);
+
     return {
       decision: "ORDER_NOW",
-      severity: Math.round(sev),
-      reason: `Low cover (${round2(daysCover)}d) vs lead time (${t.leadTimeDays}d) → likely stockout before replenishment.`,
-      tips: ["Order to cover lead time + safety. If supplier is unreliable, increase safety days."],
+      severity: sev,
+      reason:
+        `Critical: cover is ${fmt(daysCover)}d, below lead time (${lead}d). ` +
+        `Target cover is ${targetCover}d → reorder point ${fmt(reorderPoint)}. Missing ~${Math.round(unitsMissing)} units.`,
+      tips: [
+        `Place PO now for ~${suggestedOrder} units (to reach target cover).`,
+        "If supplier reliability is weak, increase Safety Days to protect service level.",
+        "Validate demand drivers (promo spike, seasonality, one-off orders).",
+      ],
     };
   }
 
-  if (avgDaily > 0 && onHand < reorderPoint * 1.1) {
-    const sev = clamp(40 + (reorderPoint - onHand) * 0.03, 0, 100);
+  // D) WATCH if below target cover (lead + safety)
+  if (daysToStockout < targetCover) {
+    const gapDays = targetCover - daysToStockout;
+    const sev = clamp(Math.round(25 + (gapDays / Math.max(1, targetCover)) * 60), 0, 100);
+
     return {
       decision: "WATCH",
-      severity: Math.round(sev),
-      reason: "Close to reorder point → monitor closely (risk rising).",
-      tips: ["Review upcoming demand/promo. Prepare PO draft to move fast if needed."],
+      severity: sev,
+      reason: `Watch: cover is ${fmt(daysCover)}d, below target cover (${targetCover}d = lead ${lead} + safety ${safety}).`,
+      tips: [
+        "Prepare a draft PO and monitor demand for 3–7 days.",
+        "A small supplier delay can turn this into ORDER_NOW — validate lead time.",
+        `If demand is trending up, consider increasing Safety Days (current: ${safety}).`,
+      ],
     };
   }
 
-  if (avgDaily > 0 && daysCover > t.overstockDays) {
-    const excess = daysCover - t.overstockDays;
-    const sev = clamp(55 + excess * 0.4, 0, 100);
+  // E) REDUCE if overstock
+  if (daysCover > overstockDays) {
+    const excess = daysCover - overstockDays;
+    const sev = clamp(Math.round(45 + excess * 0.35), 0, 100);
+
     return {
       decision: "REDUCE",
-      severity: Math.round(sev),
-      reason: `High cover (${round2(daysCover)}d) exceeds overstock threshold (${t.overstockDays}d).`,
-      tips: ["Stop replenishment. Consider promo, re-balance, or reduce reorder frequency."],
+      severity: sev,
+      reason: `Overstock: cover is ${fmt(daysCover)}d, above overstock threshold (${overstockDays}d).`,
+      tips: [
+        "Freeze replenishment for this SKU.",
+        "Use targeted promo/bundles to reduce holding risk.",
+        "If you have multiple warehouses, consider rebalancing stock to the higher-demand location.",
+      ],
     };
   }
 
+  // F) Healthy
   return {
     decision: "HEALTHY",
     severity: 10,
-    reason: "Within thresholds.",
-    tips: ["Maintain current policy. Validate lead time & safety days periodically."],
+    reason: "Within policy thresholds — no immediate action required.",
+    tips: [
+      "Keep current policy.",
+      "Revisit Lead/Safety Days monthly or when supplier performance changes.",
+    ],
   };
 }
 
@@ -944,26 +976,42 @@ function computeKPIs(all: RowOut[]) {
   const reduce = all.filter((r) => r.decision === "REDUCE").length;
   const dead = all.filter((r) => r.decision === "DEAD").length;
 
-  const scoreRaw = orderNow * 10 + watch * 5 + reduce * 3 + dead * 8;
-  const alertScore = clamp(Math.round((scoreRaw / Math.max(1, all.length)) * 10), 0, 100);
+  // Alert score based on severity distribution (more premium than raw counts)
+  const avgSev =
+    all.length > 0 ? Math.round(all.reduce((s, r) => s + r.severity, 0) / all.length) : 0;
+
+  const alertScore = clamp(
+    Math.round(avgSev * 0.85 + (orderNow > 0 ? 10 : 0) + (dead > 0 ? 5 : 0)),
+    0,
+    100
+  );
 
   const rec: string[] = [];
-  if (orderNow > 0) rec.push("Prioritize ORDER_NOW SKUs first (prevent immediate stockouts).");
-  if (dead > 0) rec.push("Dead stock: stop replenishment + design disposal plan (promo/liquidation).");
-  if (reduce > 0) rec.push("Overstock: freeze buying and reduce holding risk via promotions or transfers.");
-  if (watch > 0) rec.push("Watchlist: confirm supplier lead time and upcoming demand signals.");
-  if (rec.length === 0) rec.push("System looks stable today. Keep monitoring thresholds weekly.");
+  if (orderNow > 0) rec.push("Execute ORDER_NOW first (prevent immediate stockouts).");
+  if (watch > 0) rec.push("Convert WATCH items into POs based on demand trend and supplier reliability.");
+  if (dead > 0) rec.push("Dead stock: freeze replenishment and run a clearance plan.");
+  if (reduce > 0) rec.push("Overstock: pause buying and reduce holding cost through promos or transfers.");
+  if (rec.length === 0) rec.push("System is stable today. Monitor policy weekly.");
 
   return { orderNow, watch, reduce, dead, alertScore, recommendations: rec };
 }
 
 function renderOpsNarrative(kpi: any, t: Thresholds) {
+  const targetCover = t.leadTimeDays + t.safetyDays;
+
   const parts: string[] = [];
-  parts.push(`Lead time ${t.leadTimeDays}d + safety ${t.safetyDays}d define your reorder point window.`);
-  if (kpi.alertScore >= 70) parts.push("Risk is HIGH → attack stockouts first, then clean overstock.");
-  else if (kpi.alertScore >= 45) parts.push("Risk is MODERATE → watchlist can flip fast if lead time slips.");
-  else parts.push("Risk is LOW → most SKUs are stable.");
-  parts.push("Ops tip: if suppliers are unstable, increase safety days instead of over-ordering everywhere.");
+  parts.push(
+    `Your policy is driving decisions: Target Cover = Lead (${t.leadTimeDays}d) + Safety (${t.safetyDays}d) = ${targetCover}d.`
+  );
+
+  if (kpi.alertScore >= 70) parts.push("Risk level is HIGH → prevent stockouts first, then clean up dead/overstock.");
+  else if (kpi.alertScore >= 45) parts.push("Risk level is MODERATE → a small lead-time slip can escalate WATCH items.");
+  else parts.push("Risk level is LOW → most SKUs are stable under the current policy.");
+
+  parts.push(
+    "Premium tip: adjust Safety Days based on supplier reliability (not only demand). Keep the policy simple, consistent, and explainable."
+  );
+
   return parts.join(" ");
 }
 
