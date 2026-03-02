@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   loadMapping,
   loadThresholds,
@@ -61,15 +62,18 @@ export default function ResultsPage() {
     "SEVERITY" | "SUGGESTED" | "COVER_ASC" | "COVER_DESC"
   >("SEVERITY");
 
+  // ✅ UX: expand row to show extra tips
+  const [expandedRowKey, setExpandedRowKey] = useState<string | null>(null);
+
   const styles = useMemo(() => {
-    const card: React.CSSProperties = {
+    const card: CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
       background:
         "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
     };
 
-    const btnBase: React.CSSProperties = {
+    const btnBase: CSSProperties = {
       padding: "10px 14px",
       borderRadius: 12,
       fontWeight: 900,
@@ -84,7 +88,7 @@ export default function ResultsPage() {
       whiteSpace: "nowrap",
     };
 
-    const input: React.CSSProperties = {
+    const input: CSSProperties = {
       width: "100%",
       marginTop: 8,
       padding: "10px 10px",
@@ -96,8 +100,8 @@ export default function ResultsPage() {
     };
 
     return {
-      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as React.CSSProperties,
-      container: { maxWidth: 1180, margin: "0 auto", padding: "18px 20px 60px" } as React.CSSProperties,
+      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
+      container: { maxWidth: 1180, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
 
       topbar: {
         display: "flex",
@@ -105,17 +109,26 @@ export default function ResultsPage() {
         justifyContent: "space-between",
         gap: 12,
         marginBottom: 16,
-      } as React.CSSProperties,
+        position: "sticky",
+        top: 0,
+        zIndex: 30,
+        paddingTop: 10,
+        paddingBottom: 10,
+        backdropFilter: "blur(10px)",
+        background: "rgba(11,15,26,0.35)",
+        borderBottom: "1px solid rgba(27,35,64,0.6)",
+        borderRadius: 16,
+      } as CSSProperties,
 
-      brand: { display: "flex", alignItems: "center", gap: 10 } as React.CSSProperties,
+      brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
       logo: {
         width: 34,
         height: 34,
         borderRadius: 10,
         background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
-      } as React.CSSProperties,
-      title: { fontWeight: 950, letterSpacing: 0.2 } as React.CSSProperties,
-      subtitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+      } as CSSProperties,
+      title: { fontWeight: 950, letterSpacing: 0.2 } as CSSProperties,
+      subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
 
       link: {
         color: "#b7bed1",
@@ -123,14 +136,14 @@ export default function ResultsPage() {
         padding: "8px 10px",
         borderRadius: 10,
         border: "1px solid transparent",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      grid: { display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 } as React.CSSProperties,
+      grid: { display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 } as CSSProperties,
       card,
-      cardPad: { ...card, padding: 18 } as React.CSSProperties,
+      cardPad: { ...card, padding: 18 } as CSSProperties,
 
-      h1: { margin: 0, fontSize: 26, fontWeight: 950 } as React.CSSProperties,
-      p: { margin: "8px 0 0", color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
+      h1: { margin: 0, fontSize: 26, fontWeight: 950 } as CSSProperties,
+      p: { margin: "8px 0 0", color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
 
       badge: (tone: "cyan" | "amber" | "green" | "red" | "violet") => {
         const map = {
@@ -150,30 +163,68 @@ export default function ResultsPage() {
           border: `1px solid ${map.b}`,
           background: map.bg,
           color: map.c,
-        } as React.CSSProperties;
+        } as CSSProperties;
       },
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as React.CSSProperties,
-      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      kpiT: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
-      kpiV: { fontSize: 22, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
-      kpiS: { fontSize: 12, color: "#8f97ad", marginTop: 4, lineHeight: 1.4 } as React.CSSProperties,
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
+      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      kpiT: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      kpiV: { fontSize: 22, fontWeight: 950, marginTop: 6 } as CSSProperties,
+      kpiS: { fontSize: 12, color: "#8f97ad", marginTop: 4, lineHeight: 1.4 } as CSSProperties,
 
-      controls: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 12 } as React.CSSProperties,
-      box: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      label: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+      controls: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 12 } as CSSProperties,
+      box: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      label: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
       input,
-      select: { ...input, marginTop: 8 } as React.CSSProperties,
+      select: { ...input, marginTop: 8 } as CSSProperties,
 
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14, alignItems: "center" } as React.CSSProperties,
-      btnPrimary: { ...btnBase, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as React.CSSProperties,
-      btnGhost: { ...btnBase, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as React.CSSProperties,
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14, alignItems: "center" } as CSSProperties,
+      btnPrimary: { ...btnBase, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
+      btnGhost: { ...btnBase, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as CSSProperties,
 
-      tableWrap: { marginTop: 12, overflowX: "auto" } as React.CSSProperties,
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
-      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 900, padding: "0 10px" } as React.CSSProperties,
-      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0", verticalAlign: "top" } as React.CSSProperties,
+      // ✅ UX: more readable table container
+      tableWrap: {
+        marginTop: 12,
+        overflowX: "auto",
+        borderRadius: 16,
+        border: "1px solid rgba(27,35,64,0.75)",
+        background: "rgba(10,14,25,0.35)",
+        padding: 10,
+      } as CSSProperties,
+
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px", minWidth: 980 } as CSSProperties,
+
+      // ✅ UX: sticky header
+      thead: {
+        position: "sticky",
+        top: 78,
+        zIndex: 10,
+      } as CSSProperties,
+
+      th: {
+        textAlign: "left",
+        fontSize: 12,
+        color: "#aab1c4",
+        fontWeight: 900,
+        padding: "10px 10px",
+        background: "rgba(11,15,26,0.85)",
+        borderTop: "1px solid rgba(32,41,70,0.8)",
+        borderBottom: "1px solid rgba(32,41,70,0.8)",
+      } as CSSProperties,
+
+      tr: {
+        background: "rgba(20,27,48,0.55)",
+        cursor: "pointer",
+        transition: "transform 140ms ease, box-shadow 140ms ease, background 140ms ease",
+      } as CSSProperties,
+
+      trHover: {
+        background: "rgba(20,27,48,0.72)",
+        boxShadow: "0 10px 26px rgba(0,0,0,0.28)",
+        transform: "translateY(-1px)",
+      } as CSSProperties,
+
+      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0", verticalAlign: "top" } as CSSProperties,
 
       sevBar: {
         height: 8,
@@ -181,7 +232,7 @@ export default function ResultsPage() {
         border: "1px solid #202946",
         background: "rgba(255,255,255,0.06)",
         overflow: "hidden",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       sevFill: (sev: number) =>
         ({
@@ -195,9 +246,9 @@ export default function ResultsPage() {
               : sev >= 40
               ? "rgba(167,139,250,0.70)"
               : "rgba(110,231,255,0.70)",
-        } as React.CSSProperties),
+        } as CSSProperties),
 
-      muted: { fontSize: 12, color: "#8f97ad", lineHeight: 1.4 } as React.CSSProperties,
+      muted: { fontSize: 12, color: "#8f97ad", lineHeight: 1.4 } as CSSProperties,
 
       locked: {
         marginTop: 14,
@@ -207,14 +258,23 @@ export default function ResultsPage() {
         background: "rgba(167,139,250,0.08)",
         position: "relative",
         overflow: "hidden",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      lockTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 } as React.CSSProperties,
-      lockTitle: { fontWeight: 950 } as React.CSSProperties,
+      lockTop: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 } as CSSProperties,
+      lockTitle: { fontWeight: 950 } as CSSProperties,
 
-      blur: { filter: "blur(6px)", opacity: 0.75 } as React.CSSProperties,
+      blur: { filter: "blur(6px)", opacity: 0.75 } as CSSProperties,
 
-      lockBtn: { ...btnBase, background: "linear-gradient(135deg,#a78bfa,#6ee7ff)", color: "#0b0f1a" } as React.CSSProperties,
+      lockBtn: { ...btnBase, background: "linear-gradient(135deg,#a78bfa,#6ee7ff)", color: "#0b0f1a" } as CSSProperties,
+
+      // ✅ UX: legend row
+      legendRow: {
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        marginTop: 12,
+        alignItems: "center",
+      } as CSSProperties,
     };
   }, []);
 
@@ -322,6 +382,10 @@ export default function ResultsPage() {
     URL.revokeObjectURL(url);
   }
 
+  function rowKey(r: RowOut) {
+    return `${r.sku}__${r.warehouse}`;
+  }
+
   return (
     <div style={styles.wrap}>
       <div className="bg-breathe" style={{ minHeight: "100vh" }}>
@@ -365,6 +429,17 @@ export default function ResultsPage() {
                 <KPI title="Dead Stock" value={kpi.dead} sub="No sales + stock present" styles={styles} />
               </div>
 
+              {/* ✅ UX: Legend */}
+              <div style={styles.legendRow}>
+                <span style={styles.muted}>Legend:</span>
+                <span style={decisionBadge(styles, "ORDER_NOW")}>ORDER_NOW</span>
+                <span style={decisionBadge(styles, "WATCH")}>WATCH</span>
+                <span style={decisionBadge(styles, "REDUCE")}>REDUCE</span>
+                <span style={decisionBadge(styles, "DEAD")}>DEAD</span>
+                <span style={decisionBadge(styles, "HEALTHY")}>HEALTHY</span>
+                <span style={styles.muted}>• Click any row to expand tips</span>
+              </div>
+
               {/* ✅ NEW: Presets UI */}
               <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={styles.badge("violet")}>Policy Presets</span>
@@ -374,7 +449,10 @@ export default function ResultsPage() {
                   type="button"
                   style={{
                     ...styles.btnGhost,
-                    border: preset === "CONSERVATIVE" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
+                    border:
+                      preset === "CONSERVATIVE"
+                        ? "1px solid rgba(110,231,255,0.55)"
+                        : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("CONSERVATIVE")}
                 >
@@ -386,7 +464,10 @@ export default function ResultsPage() {
                   type="button"
                   style={{
                     ...styles.btnGhost,
-                    border: preset === "BALANCED" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
+                    border:
+                      preset === "BALANCED"
+                        ? "1px solid rgba(110,231,255,0.55)"
+                        : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("BALANCED")}
                 >
@@ -398,7 +479,10 @@ export default function ResultsPage() {
                   type="button"
                   style={{
                     ...styles.btnGhost,
-                    border: preset === "AGGRESSIVE" ? "1px solid rgba(110,231,255,0.55)" : (styles.btnGhost as any).border,
+                    border:
+                      preset === "AGGRESSIVE"
+                        ? "1px solid rgba(110,231,255,0.55)"
+                        : (styles.btnGhost as any).border,
                   }}
                   onClick={() => applyPreset("AGGRESSIVE")}
                 >
@@ -469,7 +553,11 @@ export default function ResultsPage() {
 
                 <div style={{ minWidth: 220 }}>
                   <div style={styles.label}>Warehouse</div>
-                  <select style={styles.select} value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value)}>
+                  <select
+                    style={styles.select}
+                    value={warehouseFilter}
+                    onChange={(e) => setWarehouseFilter(e.target.value)}
+                  >
                     <option value="ALL">All</option>
                     {warehouses.map((w) => (
                       <option key={w} value={w}>{w}</option>
@@ -519,7 +607,7 @@ export default function ResultsPage() {
               {/* Action Queue */}
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
-                  <thead>
+                  <thead style={styles.thead}>
                     <tr>
                       <th style={styles.th}>SKU</th>
                       <th style={styles.th}>WH</th>
@@ -533,31 +621,63 @@ export default function ResultsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sorted.slice(0, 250).map((r, idx) => (
-                      <tr key={idx} style={styles.tr}>
-                        <td style={styles.td}><b>{r.sku}</b></td>
-                        <td style={styles.td}>{r.warehouse}</td>
-                        <td style={styles.td}>
-                          <span style={decisionBadge(styles, r.decision)}>{r.decision}</span>
-                        </td>
-                        <td style={styles.td}>
-                          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                            <div style={{ minWidth: 44, fontWeight: 950 }}>{r.severity}</div>
-                            <div style={{ flex: 1, minWidth: 120, ...styles.sevBar }}>
-                              <div style={styles.sevFill(r.severity)} />
-                            </div>
-                          </div>
-                        </td>
-                        <td style={styles.td}>{r.suggestedOrder}</td>
-                        <td style={styles.td}>{r.onHand}</td>
-                        <td style={styles.td}>{r.sales30d}</td>
-                        <td style={styles.td}>{round2(r.daysCover)}</td>
-                        <td style={styles.td}>
-                          <div style={{ fontWeight: 900 }}>{r.reason}</div>
-                          <div style={styles.muted}>{r.tips[0] ?? "—"}</div>
-                        </td>
-                      </tr>
-                    ))}
+                    {sorted.slice(0, 250).map((r, idx) => {
+                      const key = rowKey(r);
+                      const expanded = expandedRowKey === key;
+
+                      return (
+                        <>
+                          <tr
+                            key={key}
+                            style={styles.tr}
+                            className="row-hoverable"
+                            onClick={() => setExpandedRowKey(expanded ? null : key)}
+                            title="Click to expand"
+                          >
+                            <td style={styles.td}><b>{r.sku}</b></td>
+                            <td style={styles.td}>{r.warehouse}</td>
+                            <td style={styles.td}>
+                              <span style={decisionBadge(styles, r.decision)}>{r.decision}</span>
+                            </td>
+                            <td style={styles.td}>
+                              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                                <div style={{ minWidth: 44, fontWeight: 950 }}>{r.severity}</div>
+                                <div style={{ flex: 1, minWidth: 120, ...styles.sevBar }}>
+                                  <div style={styles.sevFill(r.severity)} />
+                                </div>
+                              </div>
+                            </td>
+                            <td style={styles.td}>{r.suggestedOrder}</td>
+                            <td style={styles.td}>{r.onHand}</td>
+                            <td style={styles.td}>{r.sales30d}</td>
+                            <td style={styles.td}>{round2(r.daysCover)}</td>
+                            <td style={styles.td}>
+                              <div style={{ fontWeight: 900 }}>{r.reason}</div>
+                              <div style={styles.muted}>{r.tips[0] ?? "—"}</div>
+                            </td>
+                          </tr>
+
+                          {expanded && (
+                            <tr key={`${key}__expanded`} style={{ background: "rgba(20,27,48,0.35)" }}>
+                              <td style={{ ...styles.td }} colSpan={9}>
+                                <div style={{ display: "grid", gap: 8 }}>
+                                  <div style={{ fontWeight: 900 }}>Extra Tips</div>
+                                  <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 13 }}>
+                                    {(r.tips ?? []).slice(0, 3).map((t, i) => (
+                                      <li key={i}>{t}</li>
+                                    ))}
+                                    {(r.tips ?? []).length === 0 && <li>—</li>}
+                                  </ul>
+                                  <div style={styles.muted}>
+                                    Reorder point: {round2(r.reorderPoint)} • Avg daily: {round2(r.avgDaily)}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
                   </tbody>
                 </table>
 
@@ -669,6 +789,19 @@ export default function ResultsPage() {
             .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 15px 40px rgba(0,0,0,0.35); }
             .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
             .btn-glow:hover { transform: translateY(-1px); filter: drop-shadow(0 10px 20px rgba(110,231,255,0.2)); }
+
+            /* ✅ UX: row hover */
+            tr.row-hoverable:hover {
+              background: rgba(20,27,48,0.72) !important;
+              box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+              transform: translateY(-1px);
+            }
+
+            @media (max-width: 1050px) {
+              /* stack columns */
+              .grid-2 { grid-template-columns: 1fr !important; }
+            }
+
             @media (prefers-reduced-motion: reduce) {
               .anim-in, .bg-breathe, .hover-lift, .btn-glow {
                 animation: none !important; transition: none !important; transform: none !important; opacity: 1 !important;
@@ -763,7 +896,11 @@ function classify(x: {
 
   if (avgDaily > 0 && (daysCover < t.leadTimeDays || onHand < reorderPoint * 0.85)) {
     const gap = Math.max(0, reorderPoint - onHand);
-    const sev = clamp(70 + (t.leadTimeDays - Math.min(t.leadTimeDays, daysCover)) * 10 + gap * 0.02, 0, 100);
+    const sev = clamp(
+      70 + (t.leadTimeDays - Math.min(t.leadTimeDays, daysCover)) * 10 + gap * 0.02,
+      0,
+      100
+    );
     return {
       decision: "ORDER_NOW",
       severity: Math.round(sev),
@@ -832,7 +969,7 @@ function renderOpsNarrative(kpi: any, t: Thresholds) {
 
 /* -------------------- UI helpers -------------------- */
 
-function decisionBadge(styles: any, d: Decision): React.CSSProperties {
+function decisionBadge(styles: any, d: Decision): CSSProperties {
   if (d === "ORDER_NOW") return styles.badge("red");
   if (d === "WATCH") return styles.badge("violet");
   if (d === "REDUCE") return styles.badge("amber");
