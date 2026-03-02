@@ -52,7 +52,7 @@ export default function MovementTypesPage() {
     return u;
   }, [rows, movementTypeCol]);
 
-  const saved = typeof window !== "undefined" ? loadMovementTypeValuesV2() : null;
+  const saved = typeof window !== "undefined" ? loadMovementTypeValueMappingV2() : null;
 
   const [inValues, setInValues] = useState<string[]>(saved?.inValues ?? []);
   const [outValues, setOutValues] = useState<string[]>(saved?.outValues ?? []);
@@ -152,7 +152,7 @@ export default function MovementTypesPage() {
     // Save (unassigned will be auto treated as OTHER on save)
     const finalOther = uniq([...otherValues, ...unassigned]);
 
-    saveMovementTypeValuesV2({
+    saveMovementTypeValueMappingV2({
       inValues: uniq(inValues),
       outValues: uniq(outValues),
       otherValues: finalOther,
