@@ -2,22 +2,76 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearDemo, parseCSV, saveUpload } from "@/lib/demoStore";
+import {
+  clearAllDemo,
+  clearDatasetV2,
+  getSampleItemsCSV,
+  getSampleMovementsCSV,
+  getSampleUomCSV,
+  loadDatasetV2,
+  parseCSV,
+  saveDatasetV2,
+  type DatasetKey,
+  type DemoRow,
+} from "@/lib/demoStore";
 
 type Preview = {
   headers: string[];
-  rows: Record<string, string>[];
+  rows: DemoRow[];
   fileName?: string;
 };
 
+function makePreviewFromText(csvText: string, fileName?: string): Preview {
+  const { headers, rows } = parseCSV(csvText);
+
+  if (!headers.length) throw new Error("CSV looks empty.");
+  if (rows.length < 1) throw new Error("CSV has headers but no data rows.");
+
+  return {
+    headers,
+    rows: rows.slice(0, 10),
+    fileName,
+  };
+}
+
+function downloadTextFile(fileName: string, text: string, mime = "text/csv;charset=utf-8") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function UploadPage() {
   const router = useRouter();
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [dragOver, setDragOver] = useState(false);
-  const [error, setError] = useState<string>("");
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [busy, setBusy] = useState(false);
+  const inputRefs = {
+    movements: useRef<HTMLInputElement | null>(null),
+    items: useRef<HTMLInputElement | null>(null),
+    uom: useRef<HTMLInputElement | null>(null),
+  };
+
+  const [dragOverKey, setDragOverKey] = useState<DatasetKey | null>(null);
+  const [busyKey, setBusyKey] = useState<DatasetKey | null>(null);
+  const [error, setError] = useState("");
+
+  // hydrate previews from V2 storage if exists
+  const [previewMovements, setPreviewMovements] = useState<Preview | null>(() => {
+    const d = loadDatasetV2("movements");
+    return d ? { headers: d.headers, rows: d.rows.slice(0, 10), fileName: d.fileName } : null;
+  });
+  const [previewItems, setPreviewItems] = useState<Preview | null>(() => {
+    const d = loadDatasetV2("items");
+    return d ? { headers: d.headers, rows: d.rows.slice(0, 10), fileName: d.fileName } : null;
+  });
+  const [previewUom, setPreviewUom] = useState<Preview | null>(() => {
+    const d = loadDatasetV2("uom");
+    return d ? { headers: d.headers, rows: d.rows.slice(0, 10), fileName: d.fileName } : null;
+  });
+
+  const hasMovements = !!loadDatasetV2("movements");
 
   const styles = useMemo(() => {
     const card: React.CSSProperties = {
@@ -47,7 +101,7 @@ export default function UploadPage() {
       } as React.CSSProperties,
 
       container: {
-        maxWidth: 1080,
+        maxWidth: 1100,
         margin: "0 auto",
         padding: "18px 20px 60px",
       } as React.CSSProperties,
@@ -60,11 +114,7 @@ export default function UploadPage() {
         marginBottom: 18,
       } as React.CSSProperties,
 
-      brand: {
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-      } as React.CSSProperties,
+      brand: { display: "flex", alignItems: "center", gap: 10 } as React.CSSProperties,
 
       logo: {
         width: 34,
@@ -98,14 +148,14 @@ export default function UploadPage() {
         border: "1px solid #2a3350",
       } as React.CSSProperties,
 
-      hero: {
-        display: "grid",
-        gridTemplateColumns: "1.05fr 0.95fr",
-        gap: 16,
+      btnDanger: {
+        ...btn,
+        background: "transparent",
+        color: "#ffd4d4",
+        border: "1px solid rgba(255,80,80,0.35)",
       } as React.CSSProperties,
 
-      card,
-      cardPad: { ...card, padding: 18 } as React.CSSProperties,
+      hero: { ...card, padding: 18, marginBottom: 16 } as React.CSSProperties,
 
       pill: {
         display: "inline-block",
@@ -118,22 +168,49 @@ export default function UploadPage() {
         background: "rgba(110,231,255,0.08)",
       } as React.CSSProperties,
 
-      h1: { margin: "10px 0 8px", fontSize: 30, lineHeight: 1.15 } as React.CSSProperties,
+      h1: { margin: "10px 0 8px", fontSize: 26, lineHeight: 1.15 } as React.CSSProperties,
       p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
 
-      drop: {
-        marginTop: 14,
-        borderRadius: 16,
-        border: dragOver ? "1px solid rgba(110,231,255,0.55)" : "1px dashed #2a3350",
-        background: dragOver ? "rgba(110,231,255,0.08)" : "rgba(20,27,48,0.35)",
-        padding: 16,
-        transition: "200ms ease",
-      } as React.CSSProperties,
+      grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } as React.CSSProperties,
 
-      dropTitle: { fontWeight: 900, marginBottom: 8 } as React.CSSProperties,
+      card,
+      cardPad: { ...card, padding: 18 } as React.CSSProperties,
+
+      drop: (key: DatasetKey) =>
+        ({
+          marginTop: 12,
+          borderRadius: 16,
+          border: dragOverKey === key ? "1px solid rgba(110,231,255,0.55)" : "1px dashed #2a3350",
+          background: dragOverKey === key ? "rgba(110,231,255,0.08)" : "rgba(20,27,48,0.35)",
+          padding: 14,
+          transition: "200ms ease",
+        }) as React.CSSProperties,
+
+      dropTitle: { fontWeight: 900, marginBottom: 6 } as React.CSSProperties,
       hint: { fontSize: 13, color: "#8f97ad", lineHeight: 1.6 } as React.CSSProperties,
 
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as React.CSSProperties,
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 } as React.CSSProperties,
+
+      kpiGrid: {
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 10,
+        marginTop: 12,
+      } as React.CSSProperties,
+      kpi: {
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.55)",
+      } as React.CSSProperties,
+      kpiTitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+      kpiValue: { fontSize: 18, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
+
+      tableWrap: { marginTop: 12, overflowX: "auto" } as React.CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
+      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as React.CSSProperties,
+      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
+      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as React.CSSProperties,
 
       error: {
         marginTop: 12,
@@ -144,102 +221,202 @@ export default function UploadPage() {
         color: "#ffd4d4",
       } as React.CSSProperties,
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 } as React.CSSProperties,
-      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      kpiTitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
-      kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
-
-      tableWrap: { marginTop: 14, overflowX: "auto" } as React.CSSProperties,
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
-      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as React.CSSProperties,
-      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as React.CSSProperties,
-
-      footerNote: { marginTop: 12, fontSize: 12, color: "#8f97ad" } as React.CSSProperties,
+      footerNote: { marginTop: 10, fontSize: 12, color: "#8f97ad" } as React.CSSProperties,
     };
-  }, [dragOver]);
+  }, [dragOverKey]);
 
-  async function handleFile(file: File | null) {
+  async function handleFile(key: DatasetKey, file: File | null) {
     setError("");
     if (!file) return;
 
-    setBusy(true);
+    setBusyKey(key);
     try {
       const text = await file.text();
-      const { headers, rows } = parseCSV(text);
 
-      if (!headers.length) throw new Error("CSV looks empty.");
-      if (rows.length < 1) throw new Error("CSV has headers but no data rows.");
+      // validate + preview
+      const preview = makePreviewFromText(text, file.name);
 
-      // Preview first 10 rows only
-      setPreview({
-        headers,
-        rows: rows.slice(0, 10),
-        fileName: file.name,
-      });
+      // save FULL rows in V2
+      const parsed = parseCSV(text);
+      saveDatasetV2(key, parsed.headers, parsed.rows, { fileName: file.name });
 
-      // Save full rows to session + go mapping
-      clearDemo();
-      saveUpload(headers, rows, { fileName: file.name });
-
-      // Small delay for “premium feel”
-      setTimeout(() => {
-        router.push("/mapping");
-      }, 250);
+      if (key === "movements") setPreviewMovements(preview);
+      if (key === "items") setPreviewItems(preview);
+      if (key === "uom") setPreviewUom(preview);
     } catch (e: any) {
       setError(e?.message ?? "Failed to read CSV.");
     } finally {
-      setBusy(false);
-      setDragOver(false);
+      setBusyKey(null);
+      setDragOverKey(null);
     }
   }
 
-  function useSampleData() {
-    const sample = [
-      ["sku", "on_hand", "sales_30d", "warehouse"].join(","),
-      ["SKU-102", "120", "300", "WH-A"].join(","),
-      ["SKU-088", "900", "60", "WH-A"].join(","),
-      ["SKU-055", "40", "180", "WH-B"].join(","),
-      ["SKU-019", "0", "90", "WH-B"].join(","),
-    ].join("\n");
-
-    const parsed = parseCSV(sample);
-    clearDemo();
-    saveUpload(parsed.headers, parsed.rows, { fileName: "sample_inventory.csv" });
-
-    setPreview({
-      headers: parsed.headers,
-      rows: parsed.rows.slice(0, 10),
-      fileName: "sample_inventory.csv",
-    });
-
-    setTimeout(() => router.push("/mapping"), 250);
+  function removeDataset(key: DatasetKey) {
+    clearDatasetV2(key);
+    if (key === "movements") setPreviewMovements(null);
+    if (key === "items") setPreviewItems(null);
+    if (key === "uom") setPreviewUom(null);
   }
 
-  function downloadSampleCSV() {
-    const sample = [
-      ["sku", "on_hand", "sales_30d", "warehouse"].join(","),
-      ["SKU-102", "120", "300", "WH-A"].join(","),
-      ["SKU-088", "900", "60", "WH-A"].join(","),
-      ["SKU-055", "40", "180", "WH-B"].join(","),
-      ["SKU-019", "0", "90", "WH-B"].join(","),
-    ].join("\n");
+  function useSamples() {
+    setError("");
+    clearAllDemo(); // clear V1 + V2 to avoid mixed state
 
-    const blob = new Blob([sample], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "sample_inventory.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const m = getSampleMovementsCSV();
+    const i = getSampleItemsCSV();
+    const u = getSampleUomCSV();
+
+    // preview
+    setPreviewMovements(makePreviewFromText(m, "sample_movements.csv"));
+    setPreviewItems(makePreviewFromText(i, "sample_items.csv"));
+    setPreviewUom(makePreviewFromText(u, "sample_uom.csv"));
+
+    // save full datasets
+    const pm = parseCSV(m);
+    const pi = parseCSV(i);
+    const pu = parseCSV(u);
+
+    saveDatasetV2("movements", pm.headers, pm.rows, { fileName: "sample_movements.csv" });
+    saveDatasetV2("items", pi.headers, pi.rows, { fileName: "sample_items.csv" });
+    saveDatasetV2("uom", pu.headers, pu.rows, { fileName: "sample_uom.csv" });
   }
 
-  const headerCount = preview?.headers.length ?? 0;
-  const rowCount = preview?.rows.length ?? 0;
+  function downloadSamples() {
+    downloadTextFile("sample_movements.csv", getSampleMovementsCSV());
+    downloadTextFile("sample_items.csv", getSampleItemsCSV());
+    downloadTextFile("sample_uom.csv", getSampleUomCSV());
+  }
+
+  function goNext() {
+    setError("");
+    const m = loadDatasetV2("movements");
+    if (!m) {
+      setError("Movements.csv is required. Please upload the inventory movements ledger first.");
+      return;
+    }
+    router.push("/mapping");
+  }
+
+  function DatasetCard({
+    keyName,
+    title,
+    required,
+    preview,
+    hint,
+  }: {
+    keyName: DatasetKey;
+    title: string;
+    required?: boolean;
+    preview: Preview | null;
+    hint: string;
+  }) {
+    const headerCount = preview?.headers.length ?? 0;
+    const rowCount = preview?.rows.length ?? 0;
+
+    return (
+      <div className="hover-lift anim-in anim-delay-2" style={styles.cardPad}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+          <div style={{ fontWeight: 950, fontSize: 16 }}>
+            {title}{" "}
+            {required ? <span style={{ color: "#a78bfa" }}>(Required)</span> : <span style={{ color: "#8f97ad" }}>(Optional)</span>}
+          </div>
+          <div style={{ fontSize: 12, color: "#aab1c4" }}>{preview?.fileName ?? "No file"}</div>
+        </div>
+
+        <div style={styles.footerNote}>{hint}</div>
+
+        <div
+          style={styles.drop(keyName)}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOverKey(keyName);
+          }}
+          onDragLeave={() => setDragOverKey(null)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0] ?? null;
+            void handleFile(keyName, file);
+          }}
+        >
+          <div style={styles.dropTitle}>{busyKey === keyName ? "Reading file..." : "Drag & drop CSV here"}</div>
+          <div style={styles.hint}>Or click “Choose file”.</div>
+
+          <div style={styles.row}>
+            <button
+              className="btn-glow"
+              style={styles.btnPrimary}
+              type="button"
+              onClick={() => inputRefs[keyName].current?.click()}
+              disabled={busyKey !== null}
+            >
+              Choose file
+            </button>
+
+            {preview ? (
+              <button className="btn-glow" style={styles.btnGhost} type="button" onClick={() => removeDataset(keyName)} disabled={busyKey !== null}>
+                Remove
+              </button>
+            ) : null}
+
+            <input
+              ref={inputRefs[keyName]}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: "none" }}
+              onChange={(e) => void handleFile(keyName, e.target.files?.[0] ?? null)}
+            />
+          </div>
+        </div>
+
+        <div style={styles.kpiGrid}>
+          <div style={styles.kpi}>
+            <div style={styles.kpiTitle}>Detected columns</div>
+            <div style={styles.kpiValue}>{headerCount || "—"}</div>
+          </div>
+          <div style={styles.kpi}>
+            <div style={styles.kpiTitle}>Preview rows</div>
+            <div style={styles.kpiValue}>{rowCount || "—"}</div>
+          </div>
+          <div style={styles.kpi}>
+            <div style={styles.kpiTitle}>Status</div>
+            <div style={styles.kpiValue}>{preview ? "Loaded" : "—"}</div>
+          </div>
+        </div>
+
+        {preview ? (
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  {preview.headers.slice(0, 6).map((h) => (
+                    <th key={h} style={styles.th}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((r, idx) => (
+                  <tr key={idx} style={styles.tr}>
+                    {preview.headers.slice(0, 6).map((h) => (
+                      <td key={h} style={styles.td}>
+                        {r[h] ?? ""}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div style={styles.footerNote}>Showing first 10 rows and first 6 columns.</div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div style={styles.wrap}>
-      {/* Premium background */}
       <div className="bg-breathe" style={{ minHeight: "100vh" }}>
         <div style={styles.container}>
           {/* Topbar */}
@@ -248,7 +425,7 @@ export default function UploadPage() {
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
-                <div style={styles.subtitle}>Demo • Upload → Map Columns → Results</div>
+                <div style={styles.subtitle}>Ledger Upload → Map → Results</div>
               </div>
             </div>
 
@@ -256,150 +433,68 @@ export default function UploadPage() {
               <a href="/" style={styles.link}>
                 Home
               </a>
-              <button
-                className="btn-glow"
-                style={styles.btnGhost}
-                onClick={downloadSampleCSV}
-                type="button"
-              >
-                Download sample CSV
+
+              <button className="btn-glow" style={styles.btnGhost} type="button" onClick={downloadSamples} disabled={busyKey !== null}>
+                Download CSV templates
+              </button>
+
+              <button className="btn-glow" style={styles.btnGhost} type="button" onClick={useSamples} disabled={busyKey !== null}>
+                Use sample datasets
+              </button>
+
+              <button className="btn-glow" style={styles.btnPrimary} type="button" onClick={goNext} disabled={!hasMovements || busyKey !== null}>
+                Continue → Mapping
               </button>
             </div>
           </div>
 
-          <div style={styles.hero}>
-            {/* Left: Instructions + Dropzone */}
-            <div className="anim-in anim-delay-2" style={styles.cardPad}>
-              <span style={styles.pill}>⚡ Demo Upload</span>
-              <h1 style={styles.h1}>Upload your inventory CSV</h1>
-              <p style={styles.p}>
-                Minimum required fields: <b style={{ color: "#e6e8ee" }}>SKU</b>,{" "}
-                <b style={{ color: "#e6e8ee" }}>On Hand</b>,{" "}
-                <b style={{ color: "#e6e8ee" }}>Sales (30d)</b>.
-                <br />
-                Warehouse is optional (you can still map it).
-              </p>
+          {/* Hero info */}
+          <div className="anim-in anim-delay-2" style={styles.hero}>
+            <span style={styles.pill}>⚡ Demo Upload (Ledger-first)</span>
+            <h1 style={styles.h1}>Upload inventory movements (required) + optional master data</h1>
+            <p style={styles.p}>
+              <b style={{ color: "#e6e8ee" }}>Movements.csv</b> is required (each row = one movement).
+              <br />
+              <b style={{ color: "#e6e8ee" }}>Items.csv</b> and <b style={{ color: "#e6e8ee" }}>UOM_Conversions.csv</b> are optional.
+            </p>
 
-              <div
-                style={styles.drop}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const file = e.dataTransfer.files?.[0] ?? null;
-                  void handleFile(file);
-                }}
-              >
-                <div style={styles.dropTitle}>
-                  {busy ? "Reading file..." : "Drag & drop your CSV here"}
-                </div>
-                <div style={styles.hint}>
-                  Or click “Choose file”. We’ll take you to column mapping next.
-                </div>
-
-                <div style={styles.row}>
-                  <button
-                    className="btn-glow"
-                    style={styles.btnPrimary}
-                    type="button"
-                    onClick={() => inputRef.current?.click()}
-                    disabled={busy}
-                  >
-                    Choose file
-                  </button>
-
-                  <button
-                    className="btn-glow"
-                    style={styles.btnGhost}
-                    type="button"
-                    onClick={useSampleData}
-                    disabled={busy}
-                  >
-                    Use sample data
-                  </button>
-
-                  <input
-                    ref={inputRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    style={{ display: "none" }}
-                    onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
-                  />
-                </div>
-              </div>
-
-              {error ? <div style={styles.error}>{error}</div> : null}
-
+            {!hasMovements ? (
               <div style={styles.footerNote}>
-                Privacy: Demo stores data in your browser session only (no server save).
+                Tip: start with templates → click <b>Download CSV templates</b>.
               </div>
-            </div>
-
-            {/* Right: Preview */}
-            <div className="hover-lift anim-in anim-delay-3" style={styles.cardPad}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
-                <div style={{ fontWeight: 950, fontSize: 18 }}>Preview</div>
-                <div style={{ fontSize: 12, color: "#aab1c4" }}>
-                  {preview?.fileName ? preview.fileName : "No file yet"}
-                </div>
-              </div>
-
-              <div style={styles.kpiGrid}>
-                <div style={styles.kpi}>
-                  <div style={styles.kpiTitle}>Detected columns</div>
-                  <div style={styles.kpiValue}>{headerCount || "—"}</div>
-                </div>
-                <div style={styles.kpi}>
-                  <div style={styles.kpiTitle}>Preview rows</div>
-                  <div style={styles.kpiValue}>{rowCount || "—"}</div>
-                </div>
-                <div style={styles.kpi}>
-                  <div style={styles.kpiTitle}>Next step</div>
-                  <div style={styles.kpiValue}>Mapping</div>
-                </div>
-              </div>
-
-              {!preview ? (
-                <div style={{ marginTop: 14, color: "#b7bed1", lineHeight: 1.7 }}>
-                  Upload a CSV to see a preview of the first rows before mapping.
-                </div>
-              ) : (
-                <div style={styles.tableWrap}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr>
-                        {preview.headers.slice(0, 6).map((h) => (
-                          <th key={h} style={styles.th}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {preview.rows.map((r, idx) => (
-                        <tr key={idx} style={styles.tr}>
-                          {preview.headers.slice(0, 6).map((h) => (
-                            <td key={h} style={styles.td}>
-                              {r[h] ?? ""}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  <div style={styles.footerNote}>
-                    Showing first 10 rows and first 6 columns (for speed).
-                  </div>
-                </div>
-              )}
-            </div>
+            ) : (
+              <div style={styles.footerNote}>Movements loaded ✅ You can continue to Mapping.</div>
+            )}
           </div>
 
-          {/* Global styles (same vibe as landing) */}
+          {/* Grid */}
+          <div style={styles.grid}>
+            <DatasetCard
+              keyName="movements"
+              title="Movements.csv"
+              required
+              preview={previewMovements}
+              hint="Must include: item_id, date, qty, movement_type. uom/warehouse optional."
+            />
+
+            <DatasetCard
+              keyName="items"
+              title="Items.csv"
+              preview={previewItems}
+              hint="Optional product master data: item_name, category, default_uom, shelf_life_days..."
+            />
+
+            <DatasetCard
+              keyName="uom"
+              title="UOM_Conversions.csv"
+              preview={previewUom}
+              hint="Optional conversions: item_id, from_uom, to_uom, factor (e.g., 1 case = 24 piece)."
+            />
+          </div>
+
+          {error ? <div style={styles.error}>{error}</div> : null}
+
+          {/* Global styles */}
           <style jsx global>{`
             .bg-breathe {
               background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
@@ -430,9 +525,6 @@ export default function UploadPage() {
             }
             .anim-delay-2 {
               animation-delay: 160ms;
-            }
-            .anim-delay-3 {
-              animation-delay: 240ms;
             }
 
             @keyframes fadeUp {
