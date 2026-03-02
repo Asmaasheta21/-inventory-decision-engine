@@ -2,7 +2,16 @@
 // Demo storage + CSV utilities (client-only).
 // Uses sessionStorage so nothing is persisted on the server.
 
+/* =========================================================
+   Common types
+========================================================= */
+
 export type DemoRow = Record<string, string>;
+
+/* =========================================================
+   V1 (Legacy) - single CSV upload + simple mapping
+   KEEP THIS to avoid breaking existing pages.
+========================================================= */
 
 export type Mapping = {
   sku: string;
@@ -12,12 +21,12 @@ export type Mapping = {
 };
 
 export type Thresholds = {
-  leadTimeDays: number;   // default 7
-  safetyDays: number;     // default 7
-  overstockDays: number;  // default 90
+  leadTimeDays: number; // default 7
+  safetyDays: number; // default 7
+  overstockDays: number; // default 90
 };
 
-type DemoPayload = {
+type DemoPayloadV1 = {
   headers: string[];
   rows: DemoRow[];
   mapping?: Mapping;
@@ -29,7 +38,7 @@ type DemoPayload = {
   };
 };
 
-const STORAGE_KEY = "ide_demo_payload_v1";
+const STORAGE_KEY_V1 = "ide_demo_payload_v1";
 
 /* ---------------------------------
    Safe storage helpers
@@ -39,30 +48,30 @@ function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof sessionStorage !== "undefined";
 }
 
-function readPayload(): DemoPayload | null {
+function readPayloadV1(): DemoPayloadV1 | null {
   if (!isBrowser()) return null;
-  const raw = sessionStorage.getItem(STORAGE_KEY);
+  const raw = sessionStorage.getItem(STORAGE_KEY_V1);
   if (!raw) return null;
 
   try {
-    return JSON.parse(raw) as DemoPayload;
+    return JSON.parse(raw) as DemoPayloadV1;
   } catch {
     return null;
   }
 }
 
-function writePayload(payload: DemoPayload) {
+function writePayloadV1(payload: DemoPayloadV1) {
   if (!isBrowser()) return;
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  sessionStorage.setItem(STORAGE_KEY_V1, JSON.stringify(payload));
 }
 
 /* ---------------------------------
-   Public API (what pages use)
+   Public API (V1)
 ---------------------------------- */
 
 /** Save uploaded CSV into session (headers + rows). */
 export function saveUpload(headers: string[], rows: DemoRow[], opts?: { fileName?: string }) {
-  const payload: DemoPayload = {
+  const payload: DemoPayloadV1 = {
     headers,
     rows,
     meta: {
@@ -71,58 +80,58 @@ export function saveUpload(headers: string[], rows: DemoRow[], opts?: { fileName
       rowCount: rows.length,
     },
   };
-  writePayload(payload);
+  writePayloadV1(payload);
 }
 
 /** Load upload data (headers + rows). */
-export function loadUpload(): { headers: string[]; rows: DemoRow[]; meta?: DemoPayload["meta"] } | null {
-  const p = readPayload();
+export function loadUpload(): { headers: string[]; rows: DemoRow[]; meta?: DemoPayloadV1["meta"] } | null {
+  const p = readPayloadV1();
   if (!p?.headers?.length || !Array.isArray(p.rows)) return null;
   return { headers: p.headers, rows: p.rows, meta: p.meta };
 }
 
 /** Save the user's column mapping. */
 export function saveMapping(mapping: Mapping) {
-  const p = readPayload();
+  const p = readPayloadV1();
   if (!p) return;
-  writePayload({ ...p, mapping });
+  writePayloadV1({ ...p, mapping });
 }
 
 /** Load the saved mapping. */
 export function loadMapping(): Mapping | null {
-  const p = readPayload();
+  const p = readPayloadV1();
   return p?.mapping ?? null;
 }
 
 /** Save thresholds for calculations (client-only). */
 export function saveThresholds(t: Thresholds) {
-  const p = readPayload();
+  const p = readPayloadV1();
   // If no upload yet, still allow thresholds to exist
-  const base: DemoPayload =
+  const base: DemoPayloadV1 =
     p ??
     ({
       headers: [],
       rows: [],
       meta: { createdAtISO: new Date().toISOString(), rowCount: 0 },
-    } as DemoPayload);
+    } as DemoPayloadV1);
 
-  writePayload({ ...base, thresholds: normalizeThresholds(t) });
+  writePayloadV1({ ...base, thresholds: normalizeThresholds(t) });
 }
 
 /** Load thresholds with defaults. */
 export function loadThresholds(): Thresholds {
-  const p = readPayload();
+  const p = readPayloadV1();
   return normalizeThresholds(p?.thresholds);
 }
 
-/** Clear everything (demo reset). */
+/** Clear V1 only (legacy demo reset). */
 export function clearDemo() {
   if (!isBrowser()) return;
-  sessionStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(STORAGE_KEY_V1);
 }
 
 /* ---------------------------------
-   Data normalization
+   Data normalization (V1)
 ---------------------------------- */
 
 function normalizeThresholds(t?: Partial<Thresholds> | null): Thresholds {
@@ -138,9 +147,9 @@ function clampInt(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
 
-/* ---------------------------------
-   CSV parsing (demo-grade, robust enough)
----------------------------------- */
+/* =========================================================
+   CSV parsing (shared)
+========================================================= */
 
 /**
  * Parse CSV text into headers + rows.
@@ -220,4 +229,134 @@ export function toNumber(x: string): number {
   const cleaned = (x ?? "").toString().replace(/,/g, "").trim();
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
+}
+
+/* =========================================================
+   V2 (NEW) - Multi-dataset ledger-first (movements/items/uom)
+========================================================= */
+
+export type DatasetKey = "movements" | "items" | "uom";
+
+export type Dataset = {
+  headers: string[];
+  rows: DemoRow[];
+  fileName?: string;
+};
+
+export type DemoStateV2 = {
+  datasets: Partial<Record<DatasetKey, Dataset>>;
+  meta?: { createdAtISO: string };
+  // لاحقًا: mappingV2 / thresholdsV2 / movementTypeValueMap / uomBase...
+};
+
+const STORAGE_KEY_V2 = "ide_demo_state_v2";
+
+function readStateV2(): DemoStateV2 | null {
+  if (!isBrowser()) return null;
+  const raw = sessionStorage.getItem(STORAGE_KEY_V2);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as DemoStateV2;
+  } catch {
+    return null;
+  }
+}
+
+function writeStateV2(state: DemoStateV2) {
+  if (!isBrowser()) return;
+  sessionStorage.setItem(STORAGE_KEY_V2, JSON.stringify(state));
+}
+
+/** Clear V2 only. */
+export function clearDemoV2() {
+  if (!isBrowser()) return;
+  sessionStorage.removeItem(STORAGE_KEY_V2);
+}
+
+/** Clear EVERYTHING (V1 + V2) to prevent mixed demos. */
+export function clearAllDemo() {
+  clearDemo();
+  clearDemoV2();
+}
+
+/** Load all datasets (V2). */
+export function loadDatasetsV2(): DemoStateV2["datasets"] {
+  const s = readStateV2();
+  return s?.datasets ?? {};
+}
+
+/** Load one dataset (V2). */
+export function loadDatasetV2(key: DatasetKey): Dataset | null {
+  const s = readStateV2();
+  return s?.datasets?.[key] ?? null;
+}
+
+/** Save one dataset (V2). */
+export function saveDatasetV2(
+  key: DatasetKey,
+  headers: string[],
+  rows: DemoRow[],
+  opts?: { fileName?: string }
+) {
+  const s: DemoStateV2 =
+    readStateV2() ?? {
+      datasets: {},
+      meta: { createdAtISO: new Date().toISOString() },
+    };
+
+  s.datasets = s.datasets ?? {};
+  s.datasets[key] = { headers, rows, fileName: opts?.fileName };
+
+  if (!s.meta?.createdAtISO) {
+    s.meta = { createdAtISO: new Date().toISOString() };
+  }
+
+  writeStateV2(s);
+}
+
+/** Remove one dataset (V2). */
+export function clearDatasetV2(key: DatasetKey) {
+  const s = readStateV2();
+  if (!s?.datasets) return;
+  delete s.datasets[key];
+  writeStateV2(s);
+}
+
+/* -------------------------------
+   V2 Sample CSV generators
+-------------------------------- */
+
+/** Required sample ledger: each row = movement. */
+export function getSampleMovementsCSV() {
+  return [
+    ["item_id", "date", "qty", "uom", "movement_type", "warehouse"].join(","),
+    ["SKU-102", "2026-02-01", "120", "piece", "RECEIPT", "WH-A"].join(","),
+    ["SKU-102", "2026-02-15", "40", "piece", "ISSUE", "WH-A"].join(","),
+    ["SKU-088", "2026-02-01", "900", "piece", "RECEIPT", "WH-A"].join(","),
+    ["SKU-088", "2026-02-20", "60", "piece", "ISSUE", "WH-A"].join(","),
+    ["SKU-055", "2026-02-05", "40", "piece", "RECEIPT", "WH-B"].join(","),
+    ["SKU-055", "2026-02-25", "18", "piece", "ISSUE", "WH-B"].join(","),
+    ["SKU-019", "2026-02-10", "10", "piece", "RECEIPT", "WH-B"].join(","),
+    ["SKU-019", "2026-02-18", "10", "piece", "SCRAP", "WH-B"].join(","),
+  ].join("\n");
+}
+
+/** Optional master data. */
+export function getSampleItemsCSV() {
+  return [
+    ["item_id", "item_name", "category", "default_uom", "shelf_life_days"].join(","),
+    ["SKU-102", "Sample Item 102", "Snacks", "piece", "0"].join(","),
+    ["SKU-088", "Sample Item 088", "Snacks", "piece", "0"].join(","),
+    ["SKU-055", "Sample Item 055", "Beverage", "piece", "0"].join(","),
+    ["SKU-019", "Sample Item 019", "Beverage", "piece", "0"].join(","),
+  ].join("\n");
+}
+
+/** Optional unit conversions. */
+export function getSampleUomCSV() {
+  return [
+    ["item_id", "from_uom", "to_uom", "factor"].join(","),
+    ["SKU-055", "case", "piece", "24"].join(","),
+  ].join("\n");
 }
