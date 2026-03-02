@@ -2,7 +2,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearDemo, parseCSV, saveUpload } from "@/lib/demoStore";
+import { clearDemo, saveUpload } from "@/lib/demoStore";
+import { parseTabular } from "@/lib/parseTabular";
 
 type Preview = {
   headers: string[];
@@ -159,17 +160,31 @@ export default function UploadPage() {
     };
   }, [dragOver]);
 
+  function isSupported(file: File) {
+    const name = file.name.toLowerCase();
+    const ok =
+      name.endsWith(".csv") ||
+      name.endsWith(".xlsx") ||
+      file.type === "text/csv" ||
+      file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    return ok;
+  }
+
   async function handleFile(file: File | null) {
     setError("");
     if (!file) return;
 
+    if (!isSupported(file)) {
+      setError("Unsupported file type. Please upload a .csv or .xlsx file.");
+      return;
+    }
+
     setBusy(true);
     try {
-      const text = await file.text();
-      const { headers, rows } = parseCSV(text);
+      const { headers, rows } = await parseTabular(file);
 
-      if (!headers.length) throw new Error("CSV looks empty.");
-      if (rows.length < 1) throw new Error("CSV has headers but no data rows.");
+      if (!headers?.length) throw new Error("File looks empty (no headers detected).");
+      if (!rows?.length) throw new Error("File has headers but no data rows.");
 
       // Preview first 10 rows only
       setPreview({
@@ -178,7 +193,7 @@ export default function UploadPage() {
         fileName: file.name,
       });
 
-      // Save full rows to session + go mapping
+      // Save full rows to demo store + go to mapping
       clearDemo();
       saveUpload(headers, rows, { fileName: file.name });
 
@@ -187,33 +202,11 @@ export default function UploadPage() {
         router.push("/mapping");
       }, 250);
     } catch (e: any) {
-      setError(e?.message ?? "Failed to read CSV.");
+      setError(e?.message ?? "Failed to read file.");
     } finally {
       setBusy(false);
       setDragOver(false);
     }
-  }
-
-  function useSampleData() {
-    const sample = [
-      ["sku", "on_hand", "sales_30d", "warehouse"].join(","),
-      ["SKU-102", "120", "300", "WH-A"].join(","),
-      ["SKU-088", "900", "60", "WH-A"].join(","),
-      ["SKU-055", "40", "180", "WH-B"].join(","),
-      ["SKU-019", "0", "90", "WH-B"].join(","),
-    ].join("\n");
-
-    const parsed = parseCSV(sample);
-    clearDemo();
-    saveUpload(parsed.headers, parsed.rows, { fileName: "sample_inventory.csv" });
-
-    setPreview({
-      headers: parsed.headers,
-      rows: parsed.rows.slice(0, 10),
-      fileName: "sample_inventory.csv",
-    });
-
-    setTimeout(() => router.push("/mapping"), 250);
   }
 
   function downloadSampleCSV() {
@@ -248,7 +241,7 @@ export default function UploadPage() {
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
-                <div style={styles.subtitle}>Demo • Upload → Map Columns → Results</div>
+                <div style={styles.subtitle}>Demo • Upload (CSV/XLSX) → Map Columns → Results</div>
               </div>
             </div>
 
@@ -256,12 +249,7 @@ export default function UploadPage() {
               <a href="/" style={styles.link}>
                 Home
               </a>
-              <button
-                className="btn-glow"
-                style={styles.btnGhost}
-                onClick={downloadSampleCSV}
-                type="button"
-              >
+              <button className="btn-glow" style={styles.btnGhost} onClick={downloadSampleCSV} type="button">
                 Download sample CSV
               </button>
             </div>
@@ -271,13 +259,14 @@ export default function UploadPage() {
             {/* Left: Instructions + Dropzone */}
             <div className="anim-in anim-delay-2" style={styles.cardPad}>
               <span style={styles.pill}>⚡ Demo Upload</span>
-              <h1 style={styles.h1}>Upload your inventory CSV</h1>
+              <h1 style={styles.h1}>Upload your inventory file</h1>
               <p style={styles.p}>
+                Supported: <b style={{ color: "#e6e8ee" }}>.csv</b> and{" "}
+                <b style={{ color: "#e6e8ee" }}>.xlsx</b>.
+                <br />
                 Minimum required fields: <b style={{ color: "#e6e8ee" }}>SKU</b>,{" "}
                 <b style={{ color: "#e6e8ee" }}>On Hand</b>,{" "}
-                <b style={{ color: "#e6e8ee" }}>Sales (30d)</b>.
-                <br />
-                Warehouse is optional (you can still map it).
+                <b style={{ color: "#e6e8ee" }}>Sales (30d)</b>. Warehouse is optional.
               </p>
 
               <div
@@ -293,12 +282,8 @@ export default function UploadPage() {
                   void handleFile(file);
                 }}
               >
-                <div style={styles.dropTitle}>
-                  {busy ? "Reading file..." : "Drag & drop your CSV here"}
-                </div>
-                <div style={styles.hint}>
-                  Or click “Choose file”. We’ll take you to column mapping next.
-                </div>
+                <div style={styles.dropTitle}>{busy ? "Reading file..." : "Drag & drop your CSV/XLSX here"}</div>
+                <div style={styles.hint}>Or click “Choose file”. We’ll take you to column mapping next.</div>
 
                 <div style={styles.row}>
                   <button
@@ -311,20 +296,10 @@ export default function UploadPage() {
                     Choose file
                   </button>
 
-                  <button
-                    className="btn-glow"
-                    style={styles.btnGhost}
-                    type="button"
-                    onClick={useSampleData}
-                    disabled={busy}
-                  >
-                    Use sample data
-                  </button>
-
                   <input
                     ref={inputRef}
                     type="file"
-                    accept=".csv,text/csv"
+                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     style={{ display: "none" }}
                     onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
                   />
@@ -333,18 +308,14 @@ export default function UploadPage() {
 
               {error ? <div style={styles.error}>{error}</div> : null}
 
-              <div style={styles.footerNote}>
-                Privacy: Demo stores data in your browser session only (no server save).
-              </div>
+              <div style={styles.footerNote}>Privacy: Demo stores data in your browser session only (no server save).</div>
             </div>
 
             {/* Right: Preview */}
             <div className="hover-lift anim-in anim-delay-3" style={styles.cardPad}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                 <div style={{ fontWeight: 950, fontSize: 18 }}>Preview</div>
-                <div style={{ fontSize: 12, color: "#aab1c4" }}>
-                  {preview?.fileName ? preview.fileName : "No file yet"}
-                </div>
+                <div style={{ fontSize: 12, color: "#aab1c4" }}>{preview?.fileName ? preview.fileName : "No file yet"}</div>
               </div>
 
               <div style={styles.kpiGrid}>
@@ -364,7 +335,7 @@ export default function UploadPage() {
 
               {!preview ? (
                 <div style={{ marginTop: 14, color: "#b7bed1", lineHeight: 1.7 }}>
-                  Upload a CSV to see a preview of the first rows before mapping.
+                  Upload a CSV/XLSX to see a preview of the first rows before mapping.
                 </div>
               ) : (
                 <div style={styles.tableWrap}>
@@ -391,15 +362,13 @@ export default function UploadPage() {
                     </tbody>
                   </table>
 
-                  <div style={styles.footerNote}>
-                    Showing first 10 rows and first 6 columns (for speed).
-                  </div>
+                  <div style={styles.footerNote}>Showing first 10 rows and first 6 columns (for speed).</div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Global styles (same vibe as landing) */}
+          {/* Global styles */}
           <style jsx global>{`
             .bg-breathe {
               background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
