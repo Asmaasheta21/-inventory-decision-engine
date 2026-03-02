@@ -1,13 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadDatasetV2,
   saveMappingV2,
   loadMappingV2,
   type MovementsMapping,
+  validateMovementsDataset,
 } from "@/lib/demoStore";
+
+type BoxKind = "none" | "error" | "warning";
 
 export default function MappingPage() {
   const router = useRouter();
@@ -67,7 +70,11 @@ export default function MappingPage() {
       ""
   );
 
-  const [error, setError] = useState<string>("");
+  // Separate boxes: errors vs warnings
+  const [boxKind, setBoxKind] = useState<BoxKind>("none");
+  const [boxTitle, setBoxTitle] = useState<string>("");
+  const [boxLines, setBoxLines] = useState<string[]>([]);
+  const [canContinue, setCanContinue] = useState<boolean>(true);
 
   const styles = useMemo(() => {
     const card: React.CSSProperties = {
@@ -129,22 +136,50 @@ export default function MappingPage() {
 
       field: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
       label: { fontSize: 12, color: "#aab1c4", marginBottom: 8 } as React.CSSProperties,
-      select: { width: "100%", padding: "10px 10px", borderRadius: 12, border: "1px solid #2a3350", background: "#0b0f1a", color: "#e6e8ee" } as React.CSSProperties,
+      select: {
+        width: "100%",
+        padding: "10px 10px",
+        borderRadius: 12,
+        border: "1px solid #2a3350",
+        background: "#0b0f1a",
+        color: "#e6e8ee",
+      } as React.CSSProperties,
       hint: { marginTop: 8, fontSize: 12, color: "#8f97ad", lineHeight: 1.5 } as React.CSSProperties,
 
       row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as React.CSSProperties,
 
       btnPrimary: { ...btn, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as React.CSSProperties,
       btnGhost: { ...btn, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as React.CSSProperties,
+      btnDisabled: {
+        ...btn,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        color: "rgba(230,232,238,0.55)",
+        cursor: "not-allowed",
+      } as React.CSSProperties,
 
-      error: {
+      // Notice boxes (premium)
+      boxBase: {
         marginTop: 12,
         padding: 12,
         borderRadius: 12,
+        lineHeight: 1.55,
+      } as React.CSSProperties,
+
+      boxError: {
         border: "1px solid rgba(255,80,80,0.35)",
         background: "rgba(255,80,80,0.08)",
         color: "#ffd4d4",
       } as React.CSSProperties,
+
+      boxWarn: {
+        border: "1px solid rgba(255,196,0,0.28)",
+        background: "rgba(255,196,0,0.08)",
+        color: "#ffe9b3",
+      } as React.CSSProperties,
+
+      boxTitle: { fontWeight: 950, marginBottom: 6 } as React.CSSProperties,
+      boxList: { margin: 0, paddingLeft: 18 } as React.CSSProperties,
 
       kpiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 } as React.CSSProperties,
       kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
@@ -191,27 +226,52 @@ export default function MappingPage() {
     );
   }
 
-  function validate() {
-    setError("");
+  function setErrorBox(title: string, lines: string[]) {
+    setBoxKind("error");
+    setBoxTitle(title);
+    setBoxLines(lines);
+    setCanContinue(false);
+  }
+
+  function setWarningBox(title: string, lines: string[]) {
+    setBoxKind("warning");
+    setBoxTitle(title);
+    setBoxLines(lines);
+    setCanContinue(true);
+  }
+
+  function clearBox() {
+    setBoxKind("none");
+    setBoxTitle("");
+    setBoxLines([]);
+    setCanContinue(true);
+  }
+
+  function basicMappingValidate(): string[] {
+    const errs: string[] = [];
 
     if (!itemId || !date || !qty || !movementType) {
-      setError("Please map Item ID, Date, Quantity, and Movement Type.");
-      return false;
+      errs.push("Please map Item ID, Date, Quantity, and Movement Type.");
+      return errs;
     }
 
     const required = [itemId, date, qty, movementType];
     if (new Set(required).size !== required.length) {
-      setError("Item ID / Date / Qty / Movement Type must be different columns.");
-      return false;
+      errs.push("Item ID / Date / Qty / Movement Type must be different columns.");
     }
 
-    return true;
+    // quick delimiter sanity hint (if parsing produced 1 column)
+    if (headers.length === 1) {
+      errs.push(
+        "Only 1 column detected. Your CSV may use ';' or TAB delimiter. Re-export as CSV (comma) or upload a properly delimited file."
+      );
+    }
+
+    return errs;
   }
 
-  function continueNext() {
-    if (!validate()) return;
-
-    const mapping: MovementsMapping = {
+  function buildMapping(): MovementsMapping {
+    return {
       itemId,
       date,
       qty,
@@ -219,13 +279,60 @@ export default function MappingPage() {
       warehouse: warehouse || undefined,
       uom: uom || undefined,
     };
+  }
 
+  function runFullValidation(showWarnings: boolean) {
+    // 1) basic mapping validation
+    const basicErrs = basicMappingValidate();
+    if (basicErrs.length) {
+      setErrorBox("Fix mapping", basicErrs);
+      return;
+    }
+
+    // 2) dataset validation using mapping
+    const mapping = buildMapping();
+    const v = validateMovementsDataset(headers, movements?.rows ?? [], mapping);
+
+    if (!v.ok) {
+      // combine + make it readable
+      const lines = [...v.errors];
+      setErrorBox("Dataset validation failed", lines);
+      return;
+    }
+
+    // if ok but warnings exist
+    if (showWarnings && v.warnings.length) {
+      setWarningBox("Looks good, but please review", v.warnings);
+      return;
+    }
+
+    clearBox();
+  }
+
+  // Live validation: run when user changes mapping selections
+  useEffect(() => {
+    // don't spam warnings; validate quietly unless it's blocking
+    runFullValidation(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemId, date, qty, movementType, warehouse, uom]);
+
+  function continueNext() {
+    // show warnings on Continue (but don't block)
+    runFullValidation(true);
+
+    // if blocking errors, stop
+    if (!canContinue) return;
+
+    const mapping = buildMapping();
+
+    // save mapping
     saveMappingV2(mapping);
 
-    // المرحلة الجاية: نعمل movement type value mapping
-    // دلوقتي هنروح results (هتتعدل بعدين عشان تعتمد على Movements)
+    // next step later: movement type value mapping
     router.push("/results");
   }
+
+  const mappedRequiredCount = [itemId, date, qty, movementType].filter(Boolean).length;
 
   return (
     <div style={styles.wrap}>
@@ -292,7 +399,7 @@ export default function MappingPage() {
                   setValue={setQty}
                   headers={headers}
                   styles={styles}
-                  hint="Movement quantity (positive number)."
+                  hint="Movement quantity (can be positive or negative depending on the ERP)."
                 />
 
                 <Field
@@ -329,12 +436,38 @@ export default function MappingPage() {
                 <button className="btn-glow" style={styles.btnGhost} type="button" onClick={() => router.push("/upload")}>
                   Back
                 </button>
-                <button className="btn-glow" style={styles.btnPrimary} type="button" onClick={continueNext}>
+
+                <button
+                  className="btn-glow"
+                  style={canContinue ? styles.btnPrimary : styles.btnDisabled}
+                  type="button"
+                  onClick={continueNext}
+                  disabled={!canContinue}
+                  title={!canContinue ? "Fix errors to continue" : "Continue"}
+                >
                   Continue
                 </button>
               </div>
 
-              {error ? <div style={styles.error}>{error}</div> : null}
+              {/* Errors / warnings box */}
+              {boxKind !== "none" ? (
+                <div
+                  style={{
+                    ...(styles.boxBase as any),
+                    ...(boxKind === "error" ? styles.boxError : styles.boxWarn),
+                  }}
+                >
+                  <div style={styles.boxTitle}>
+                    {boxKind === "error" ? "⛔ " : "⚠️ "}
+                    {boxTitle}
+                  </div>
+                  <ul style={styles.boxList}>
+                    {boxLines.map((l, i) => (
+                      <li key={i}>{l}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               <div style={styles.note}>
                 Next step (later): we’ll ask you to map movement type values (e.g., “GI” → ISSUE).
@@ -349,11 +482,7 @@ export default function MappingPage() {
               </div>
 
               <div style={styles.kpiGrid}>
-                <KPI
-                  title="Mapped (required)"
-                  value={`${[itemId, date, qty, movementType].filter(Boolean).length}/4`}
-                  styles={styles}
-                />
+                <KPI title="Mapped (required)" value={`${mappedRequiredCount}/4`} styles={styles} />
                 <KPI
                   title="Optional"
                   value={`${warehouse ? "Warehouse ✓" : "No warehouse"} • ${uom ? "UOM ✓" : "No UOM"}`}
