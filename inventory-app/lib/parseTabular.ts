@@ -1,28 +1,29 @@
 import { parseCSV } from "@/lib/demoStore";
-import { parseXlsxWithExcelJS, ParsedTabular } from "@/lib/parseXlsxExceljs";
+import { parseXlsx, type ParsedTabular } from "@/lib/parseXlsx";
 
 export async function parseTabular(file: File): Promise<ParsedTabular> {
-  const name = file.name.toLowerCase();
+  const name = file.name.toLowerCase().trim();
+
+  // XLSX
+  if (name.endsWith(".xlsx")) {
+    return await parseXlsx(file);
+  }
 
   // CSV
   if (name.endsWith(".csv")) {
     const text = await file.text();
     const { headers, rows } = parseCSV(text);
 
-    return {
-      headers,
-      rows: rows.map((r: any) => {
-        const out: Record<string, string> = {};
-        for (const h of headers) out[h] = String(r[h] ?? "").trim();
-        return out;
-      }),
-    };
+    // تأمين النوع: نخلي القيم string
+    const safeRows: Record<string, string>[] = rows.map((r: any) => {
+      const obj: Record<string, string> = {};
+      for (const h of headers) obj[h] = (r?.[h] ?? "").toString();
+      return obj;
+    });
+
+    return { headers, rows: safeRows };
   }
 
-  // XLSX فقط
-  if (name.endsWith(".xlsx")) {
-    return await parseXlsxWithExcelJS(file);
-  }
-
-  throw new Error("Unsupported file type. Upload .csv or .xlsx");
+  // Unsupported
+  throw new Error("Unsupported file type. Please upload .csv or .xlsx");
 }
