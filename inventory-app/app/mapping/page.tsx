@@ -329,7 +329,7 @@ export default function MappingPage() {
     saveMappingV2(mapping);
 
     // next step later: movement type value mapping
-    router.push("/results");
+   router.push("/movement-types");
   }
 
   const mappedRequiredCount = [itemId, date, qty, movementType].filter(Boolean).length;
