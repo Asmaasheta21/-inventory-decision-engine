@@ -17,25 +17,24 @@ import { runEngineV2, getDefaultEngineParams, type LineOut } from "@/lib/engineV
    Types (UI)
 ========================================================= */
 
-type Decision =
-  | "TRANSFER_FIRST"
-  | "ORDER_NOW"
-  | "WATCH"
-  | "REDUCE"
-  | "DEAD"
-  | "HEALTHY";
+type Decision = "ORDER_NOW" | "WATCH" | "REDUCE" | "DEAD" | "HEALTHY";
 
 type Thresholds = {
-  leadTimeDays: number; // user-defined
-  safetyDays: number; // user-defined
-  overstockDays: number; // user-defined (default 90)
+  leadTimeDays: number;
+  safetyDays: number;
+  overstockDays: number;
 };
 
 type EvidenceTone = "cyan" | "amber" | "green" | "red" | "violet" | "steel";
-
 type EvidenceChip = { k: string; v: string; tone?: EvidenceTone };
 
-type TransferLeg = { fromWH: string; toWH: string; qty: number };
+type Advice = {
+  headline: string;
+  bullets: string[];
+  nextReviewDays: number;
+  confidence: "High" | "Medium" | "Low";
+  proLockedBullets?: string[]; // shown as “Pro”
+};
 
 type RowOut = {
   sku: string;
@@ -46,20 +45,12 @@ type RowOut = {
   out30d: number;
   out90d: number;
 
-  avgDailyOut: number; // the chosen avg used for policy (calendar or active)
+  avgDailyOut: number;
   daysCover: number;
 
   reorderPoint: number;
   targetStock: number;
   suggestedOrder: number;
-
-  // Transfer suggestions
-  transferIn: TransferLeg[]; // legs into this WH (as receiver)
-  transferOut: TransferLeg[]; // legs out of this WH (as donor)
-  transferInQty: number;
-  transferOutQty: number;
-  purchaseAfterTransfers: number; // max(0, suggestedOrder - transferInQty)
-  coverageByTransfer: number; // transferInQty / suggestedOrder (0..1)
 
   decision: Decision;
   severity: number; // 0..100
@@ -68,17 +59,19 @@ type RowOut = {
 
   evidence: EvidenceChip[];
 
-  // extra “pro-ish” signals (still shown in evidence)
+  // signals
   profile: string;
   trend: number;
   cv30: number;
   activeDays30: number;
   loss30: number;
   lossRate30: number;
+
+  advice: Advice;
 };
 
 /* =========================================================
-   Threshold storage (localStorage) - isolated for Results
+   Threshold storage (localStorage)
 ========================================================= */
 
 const TH_KEY = "ide_thresholds_v2";
@@ -117,7 +110,7 @@ function saveThresholdsLocal(t: Thresholds) {
 }
 
 /* =========================================================
-   Formatting + UI helpers
+   Formatting
 ========================================================= */
 
 function formatNum(n: number): string {
@@ -134,10 +127,12 @@ function percent(n: number): string {
   return `${Math.round(n * 1000) / 10}%`;
 }
 
+/* =========================================================
+   Decision label + tones
+========================================================= */
+
 function decisionLabel(d: Decision): string {
   switch (d) {
-    case "TRANSFER_FIRST":
-      return "Transfer first";
     case "ORDER_NOW":
       return "Order now";
     case "WATCH":
@@ -153,8 +148,6 @@ function decisionLabel(d: Decision): string {
 
 function decisionTone(d: Decision): { bg: string; border: string; color: string } {
   switch (d) {
-    case "TRANSFER_FIRST":
-      return { bg: "rgba(110,231,255,0.10)", border: "rgba(110,231,255,0.28)", color: "#d8f7ff" };
     case "ORDER_NOW":
       return { bg: "rgba(255,80,80,0.10)", border: "rgba(255,80,80,0.35)", color: "#ffd4d4" };
     case "WATCH":
@@ -178,29 +171,131 @@ function chipTone(t?: EvidenceTone): { bg: string; border: string; color: string
   return { bg: "rgba(160,174,192,0.10)", border: "rgba(160,174,192,0.22)", color: "#d7dce6" };
 }
 
-function cap(n: number, a: number, b: number) {
-  return Math.min(b, Math.max(a, n));
+/* =========================================================
+   Advice generation (THIS is the missing UX layer)
+========================================================= */
+
+function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggestedOrder: number, daysCover: number): Advice {
+  // confidence: based on activity + volatility
+  const activity = line.activeDemandDays30;
+  const cv = line.cv30;
+  const conf: Advice["confidence"] =
+    activity >= 10 && cv < 1.0 ? "High" : activity >= 5 ? "Medium" : "Low";
+
+  const hasLoss = line.loss30 > 0;
+  const lossRate30 = (line.out30 + line.loss30) > 0 ? line.loss30 / (line.out30 + line.loss30) : 0;
+
+  const commonPro = [
+    "Auto-transfer suggestion before buying (across warehouses).",
+    "Supplier lead-time learning + reorder calendar.",
+    "Alerting: notify when SKU enters Order/Reduce bands.",
+  ];
+
+  if (decision === "ORDER_NOW") {
+    const bullets: string[] = [];
+    if (suggestedOrder > 0) bullets.push(`Place an order for ~${formatNum(suggestedOrder)} units (aiming for target stock).`);
+    else bullets.push("Review mapping/policy: suggested order = 0 but decision is urgent (check inputs).");
+
+    bullets.push(`Confirm lead time (${th.leadTimeDays}d) and safety buffer (${th.safetyDays}d) are realistic.`);
+    bullets.push("Validate today’s on-hand (cycle count / reconciliation) before sending PO.");
+    if (line.trend30vsPrev30 > 0.2) bullets.push("Demand is rising → consider ordering a bit earlier than usual.");
+    if (cv >= 1.2) bullets.push("High volatility → split the order into 2 drops if possible.");
+    if (hasLoss) bullets.push(`Loss detected: ${formatNum(line.loss30)} (${percent(lossRate30)}) → investigate root cause.`);
+
+    return {
+      headline: "Execute purchase now (prevent stockout).",
+      bullets,
+      nextReviewDays: Math.max(1, Math.round(th.leadTimeDays / 2) || 1),
+      confidence: conf,
+      proLockedBullets: commonPro,
+    };
+  }
+
+  if (decision === "WATCH") {
+    const bullets: string[] = [];
+    bullets.push("Do NOT buy yet. Monitor consumption and receipts this week.");
+    bullets.push("If any upcoming demand spike is known (promotion/project), switch to Order now.");
+    bullets.push("Review supplier delivery reliability (late deliveries push you into stockout).");
+    if (cv >= 1.2) bullets.push("Volatility is high → shorten review cycle (check more frequently).");
+    if (line.trend30vsPrev30 > 0.2) bullets.push("Trend is up → you may cross ROP soon (pre-approve PO draft).");
+    if (hasLoss) bullets.push(`Loss signal exists (${percent(lossRate30)}) → don’t overreact by buying extra; fix loss first.`);
+
+    return {
+      headline: "Monitor closely (near reorder band).",
+      bullets,
+      nextReviewDays: 3,
+      confidence: conf,
+      proLockedBullets: commonPro,
+    };
+  }
+
+  if (decision === "REDUCE") {
+    const bullets: string[] = [];
+    bullets.push("Stop/slow purchasing until cover returns to policy.");
+    bullets.push("Identify quick wins: bundle/discount, alternative channel, or internal consumption plan.");
+    bullets.push("Check if the SKU is duplicated across locations (possible consolidation).");
+    if (daysCover > th.overstockDays * 1.5) bullets.push("Cover is very high → consider liquidation path (strong action).");
+    if (line.out30 > 0) bullets.push("It still moves → reduce gradually, don’t dump instantly.");
+    if (hasLoss) bullets.push(`Loss exists (${percent(lossRate30)}) → overstock + loss is expensive; prioritize containment.`);
+
+    return {
+      headline: "Reduce inventory (cash is trapped).",
+      bullets,
+      nextReviewDays: 7,
+      confidence: conf,
+      proLockedBullets: [
+        "Markdown simulator: estimate margin impact vs cash release.",
+        "Transfer optimizer: move stock to highest-demand locations.",
+        ...commonPro,
+      ],
+    };
+  }
+
+  if (decision === "DEAD") {
+    const bullets: string[] = [];
+    bullets.push("Freeze purchasing immediately.");
+    bullets.push("Confirm if demand is truly zero (check substitutions / missing mapping).");
+    bullets.push("Decide disposal path: return to supplier, internal use, or liquidation.");
+    bullets.push("If it’s a new SKU, set a review window before labeling it dead.");
+    if (hasLoss) bullets.push("Loss signal exists → ensure losses are not misclassified as demand.");
+
+    return {
+      headline: "Dead stock (no demand).",
+      bullets,
+      nextReviewDays: 14,
+      confidence: conf,
+      proLockedBullets: [
+        "Dead-stock playbook: salvage value + write-off recommendation.",
+        "Root-cause detection (mapping gaps / substitution patterns).",
+        ...commonPro,
+      ],
+    };
+  }
+
+  // HEALTHY
+  {
+    const bullets: string[] = [];
+    bullets.push("No action needed. Keep policy thresholds stable.");
+    bullets.push("If you plan a demand change (seasonality), adjust lead/safety days temporarily.");
+    if (line.trend30vsPrev30 < -0.25) bullets.push("Trend down → watch for future overstock risk.");
+    if (cv >= 1.2) bullets.push("Volatile SKU → keep tighter monitoring even if healthy today.");
+    if (hasLoss) bullets.push(`Loss detected (${percent(lossRate30)}) → fix process; otherwise it will distort future decisions.`);
+
+    return {
+      headline: "Healthy position (stay the course).",
+      bullets,
+      nextReviewDays: 14,
+      confidence: conf,
+      proLockedBullets: commonPro,
+    };
+  }
 }
 
 /* =========================================================
-   Decision logic (strong + manufacturing-aware)
+   Decision logic (stronger)
 ========================================================= */
 
-function computeDecisionFromLine(
-  line: LineOut,
-  th: Thresholds
-): Omit<
-  RowOut,
-  | "sku"
-  | "warehouse"
-  | "lastMoveISO"
-  | "transferIn"
-  | "transferOut"
-  | "transferInQty"
-  | "transferOutQty"
-  | "purchaseAfterTransfers"
-  | "coverageByTransfer"
-> {
+function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "sku" | "warehouse" | "lastMoveISO" | "advice"> {
   const profile = line.profile;
 
   const avgCalendar = line.avgDailyOutCalendar30;
@@ -212,21 +307,13 @@ function computeDecisionFromLine(
       : avgCalendar;
 
   const cv = line.cv30;
-
   const volFactor =
-    profile === "LUMPY"
-      ? 1.35
-      : profile === "INTERMITTENT"
-        ? 1.2
-        : profile === "DECLINING"
-          ? 0.95
-          : 1.0;
+    profile === "LUMPY" ? 1.35 : profile === "INTERMITTENT" ? 1.2 : profile === "DECLINING" ? 0.95 : 1.0;
 
   const variabilityBump = 1 + Math.min(0.75, Math.max(0, cv)) * 0.35;
 
   const trend = line.trend30vsPrev30;
-  const trendFactor =
-    trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
+  const trendFactor = trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
 
   const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
 
@@ -234,15 +321,13 @@ function computeDecisionFromLine(
   const targetStock = reorderPoint * 1.15;
 
   const onHand = line.onHand;
-
   const suggestedOrder = Math.max(0, Math.ceil(targetStock - onHand));
 
   const daysCover = chosenAvg > 0 ? onHand / chosenAvg : onHand > 0 ? 9999 : 0;
-
   const overstockDays = Math.max(1, th.overstockDays);
 
   const loss30 = line.loss30;
-  const lossRate30 = line.out30 + loss30 > 0 ? loss30 / (line.out30 + loss30) : 0;
+  const lossRate30 = (line.out30 + loss30) > 0 ? loss30 / (line.out30 + loss30) : 0;
 
   let decision: Decision = "HEALTHY";
 
@@ -251,7 +336,9 @@ function computeDecisionFromLine(
   if (onHand < 0) decision = "ORDER_NOW";
   if (hasDemand && onHand <= reorderPoint) decision = "ORDER_NOW";
   if (hasDemand && onHand > reorderPoint && onHand <= reorderPoint * 1.25) decision = "WATCH";
+
   if (!hasDemand && onHand > 0) decision = "DEAD";
+
   if (chosenAvg > 0 && daysCover >= overstockDays) decision = "REDUCE";
   if (!hasDemand && onHand > 0 && daysCover >= overstockDays) decision = "REDUCE";
 
@@ -281,7 +368,6 @@ function computeDecisionFromLine(
   });
 
   evidence.push({ k: "On hand", v: `${formatNum(onHand)}`, tone: onHand <= 0 ? "red" : "cyan" });
-
   evidence.push({ k: "Out(30d)", v: `${formatNum(line.out30)}`, tone: "steel" });
   evidence.push({ k: "Out(90d)", v: `${formatNum(line.out90)}`, tone: "steel" });
 
@@ -321,13 +407,8 @@ function computeDecisionFromLine(
     tone: line.activeDemandDays30 <= 6 ? "amber" : "steel",
   });
 
-  if (loss30 > 0) {
-    evidence.push({ k: "Loss(30d)", v: `${formatNum(loss30)} (${percent(lossRate30)})`, tone: "amber" });
-  }
-
-  if (decision === "ORDER_NOW" && suggestedOrder > 0) {
-    evidence.push({ k: "Order", v: `${formatNum(suggestedOrder)} units`, tone: "red" });
-  }
+  if (loss30 > 0) evidence.push({ k: "Loss(30d)", v: `${formatNum(loss30)} (${percent(lossRate30)})`, tone: "amber" });
+  if (decision === "ORDER_NOW" && suggestedOrder > 0) evidence.push({ k: "Order", v: `${formatNum(suggestedOrder)} units`, tone: "red" });
 
   return {
     onHand,
@@ -356,157 +437,14 @@ function computeDecisionFromLine(
 }
 
 /* =========================================================
-   Transfer Engine (UI-layer)
-   - Works per SKU across warehouses
-   - Safe: disabled when warehouse mapping missing (only "ALL")
-========================================================= */
-
-function computeTransferPlan(rows: RowOut[], th: Thresholds): RowOut[] {
-  const bySku = new Map<string, RowOut[]>();
-  for (const r of rows) {
-    if (!bySku.has(r.sku)) bySku.set(r.sku, []);
-    bySku.get(r.sku)!.push(r);
-  }
-
-  const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
-
-  // helper: how much donor must keep (not a toy: considers CV + trend + lumpy/intermittent)
-  const donorKeepQty = (d: RowOut) => {
-    const base = d.avgDailyOut * reviewHorizon;
-
-    const cvBump = 1 + cap(d.cv30, 0, 1.5) * 0.18; // up to +27%
-    const trendBump = d.trend > 0 ? 1 + cap(d.trend, 0, 0.7) * 0.15 : 1; // rising demand => keep more
-    const profileBump = d.profile === "LUMPY" ? 1.12 : d.profile === "INTERMITTENT" ? 1.07 : 1.0;
-
-    // also: if losses are high, keep a touch extra
-    const lossBump = d.lossRate30 >= 0.08 ? 1.06 : 1.0;
-
-    return base * cvBump * trendBump * profileBump * lossBump;
-  };
-
-  const next: RowOut[] = rows.map((r) => ({
-    ...r,
-    transferIn: [],
-    transferOut: [],
-    transferInQty: 0,
-    transferOutQty: 0,
-    purchaseAfterTransfers: r.suggestedOrder,
-    coverageByTransfer: 0,
-  }));
-
-  const idx = new Map<string, RowOut>();
-  for (const r of next) idx.set(`${r.sku}||${r.warehouse}`, r);
-
-  for (const [sku, group] of bySku.entries()) {
-    // if only ALL, no transfers possible
-    const distinctWH = new Set(group.map((g) => g.warehouse));
-    if (distinctWH.size <= 1) continue;
-
-    // receivers: urgent-ish & need > 0
-    const receivers = group
-      .filter((r) => (r.decision === "ORDER_NOW" || r.decision === "WATCH") && r.suggestedOrder > 0)
-      .sort((a, b) => b.severity - a.severity);
-
-    if (!receivers.length) continue;
-
-    // donors: REDUCE with meaningful available
-    const donors = group
-      .filter((r) => r.decision === "REDUCE" && r.onHand > 0)
-      .map((d) => {
-        const keep = donorKeepQty(d);
-        const available = Math.max(0, d.onHand - keep);
-        return { d, keep, available };
-      })
-      .filter((x) => x.available >= 1)
-      .sort((a, b) => b.available - a.available);
-
-    if (!donors.length) continue;
-
-    for (const rec of receivers) {
-      let need = rec.suggestedOrder;
-      if (need <= 0) continue;
-
-      for (const don of donors) {
-        if (need <= 0) break;
-        if (don.available <= 0) continue;
-        if (don.d.warehouse === rec.warehouse) continue;
-
-        const take = Math.min(need, Math.floor(don.available));
-        if (take <= 0) continue;
-
-        don.available -= take;
-        need -= take;
-
-        const toRow = idx.get(`${sku}||${rec.warehouse}`);
-        const fromRow = idx.get(`${sku}||${don.d.warehouse}`);
-        if (!toRow || !fromRow) continue;
-
-        const leg: TransferLeg = { fromWH: don.d.warehouse, toWH: rec.warehouse, qty: take };
-        toRow.transferIn.push(leg);
-        fromRow.transferOut.push(leg);
-
-        toRow.transferInQty += take;
-        fromRow.transferOutQty += take;
-      }
-
-      const toRow = idx.get(`${sku}||${rec.warehouse}`);
-      if (!toRow) continue;
-
-      toRow.purchaseAfterTransfers = Math.max(0, toRow.suggestedOrder - toRow.transferInQty);
-      toRow.coverageByTransfer =
-        toRow.suggestedOrder > 0 ? cap(toRow.transferInQty / toRow.suggestedOrder, 0, 1) : 0;
-    }
-  }
-
-  // enrich evidence + decision override (TRANSFER_FIRST)
-  for (const r of next) {
-    if (r.transferInQty > 0) {
-      const legsText = r.transferIn
-        .slice(0, 2)
-        .map((x) => `${formatNum(x.qty)} from ${x.fromWH}`)
-        .join(" • ");
-
-      const tone: EvidenceTone =
-        r.coverageByTransfer >= 0.6 ? "cyan" : r.coverageByTransfer >= 0.25 ? "amber" : "steel";
-
-      r.evidence = [
-        { k: "Transfer", v: `${formatNum(r.transferInQty)} (${percent(r.coverageByTransfer)})`, tone },
-        { k: "From", v: legsText || "—", tone: "steel" },
-        { k: "Buy after", v: `${formatNum(r.purchaseAfterTransfers)}`, tone: r.purchaseAfterTransfers > 0 ? "amber" : "green" },
-        ...r.evidence,
-      ];
-
-      // Decision override: if transfer covers most of need, force "TRANSFER_FIRST"
-      if ((r.decision === "ORDER_NOW" || r.decision === "WATCH") && r.coverageByTransfer >= 0.6) {
-        r.decision = "TRANSFER_FIRST";
-        // severity nudged but still urgent-ish
-        r.severity = clampInt(Math.max(r.severity, 70), 50, 95);
-      }
-    }
-
-    if (r.transferOutQty > 0) {
-      const legsText = r.transferOut
-        .slice(0, 2)
-        .map((x) => `${formatNum(x.qty)} to ${x.toWH}`)
-        .join(" • ");
-
-      r.evidence = [
-        { k: "Can transfer", v: `${formatNum(r.transferOutQty)}`, tone: "violet" },
-        { k: "To", v: legsText || "—", tone: "steel" },
-        ...r.evidence,
-      ];
-    }
-  }
-
-  return next;
-}
-
-/* =========================================================
    Page
 ========================================================= */
 
 export default function ResultsPage() {
   const router = useRouter();
+
+  // Demo paywall flag (later you replace with real subscription check)
+  const isPro = false;
 
   const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
   const mappingV2: MovementsMapping | null = typeof window !== "undefined" ? loadMappingV2() : null;
@@ -522,6 +460,10 @@ export default function ResultsPage() {
   const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
   const [decisionFilter, setDecisionFilter] = useState<Decision | "ALL">("ALL");
   const [search, setSearch] = useState<string>("");
+
+  // UI states for better UX
+  const [openKey, setOpenKey] = useState<string | null>(null); // drawer
+  const [expandedEvidence, setExpandedEvidence] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const t = normalizeThresholds({ leadTimeDays, safetyDays, overstockDays });
@@ -547,7 +489,7 @@ export default function ResultsPage() {
     const btnBase: CSSProperties = {
       padding: "10px 14px",
       borderRadius: 12,
-      fontWeight: 800,
+      fontWeight: 900,
       textDecoration: "none",
       display: "inline-flex",
       alignItems: "center",
@@ -557,11 +499,12 @@ export default function ResultsPage() {
       userSelect: "none",
       border: "none",
       transition: "transform 150ms ease, filter 150ms ease",
+      whiteSpace: "nowrap",
     };
 
     return {
       wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
-      container: { maxWidth: 1180, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
+      container: { maxWidth: 1250, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
 
       hero: { ...card, padding: 18, marginBottom: 16 } as CSSProperties,
       card,
@@ -573,11 +516,12 @@ export default function ResultsPage() {
         justifyContent: "space-between",
         gap: 12,
         marginBottom: 16,
+        flexWrap: "wrap",
       } as CSSProperties,
 
       brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
       logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as CSSProperties,
-      title: { fontWeight: 900, letterSpacing: 0.2 } as CSSProperties,
+      title: { fontWeight: 950, letterSpacing: 0.2 } as CSSProperties,
       subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
 
       btnPrimary: { ...btnBase, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
@@ -590,7 +534,9 @@ export default function ResultsPage() {
       } as CSSProperties,
 
       pill: {
-        display: "inline-block",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
         padding: "6px 10px",
         borderRadius: 999,
         fontSize: 12,
@@ -602,8 +548,10 @@ export default function ResultsPage() {
 
       h1: { margin: "10px 0 8px", fontSize: 30, lineHeight: 1.15 } as CSSProperties,
       p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
+      small: { fontSize: 12, color: "#8f97ad", lineHeight: 1.55 } as CSSProperties,
 
       grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 } as CSSProperties,
+      grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 } as CSSProperties,
 
       statusRow: { marginTop: 12, color: "#aab1c4", fontSize: 13, display: "flex", gap: 12, flexWrap: "wrap" } as CSSProperties,
 
@@ -618,19 +566,6 @@ export default function ResultsPage() {
         color: "#c8ffe9",
         border: "1px solid rgba(80,255,170,0.22)",
         background: "rgba(80,255,170,0.08)",
-      } as CSSProperties,
-
-      badgeWarn: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "6px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 900,
-        color: "#ffe9b3",
-        border: "1px solid rgba(255,196,0,0.25)",
-        background: "rgba(255,196,0,0.08)",
       } as CSSProperties,
 
       badgeBad: {
@@ -662,9 +597,26 @@ export default function ResultsPage() {
 
       row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, alignItems: "center" } as CSSProperties,
 
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
+      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as CSSProperties,
+
+      // NEW: better table layout
       tableWrap: { marginTop: 14, overflowX: "auto" } as CSSProperties,
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as CSSProperties,
-      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 10px", minWidth: 1100 } as CSSProperties,
+      thead: { position: "sticky", top: 0, zIndex: 2 } as CSSProperties,
+      th: {
+        textAlign: "left",
+        fontSize: 12,
+        color: "#aab1c4",
+        fontWeight: 900,
+        padding: "10px 10px",
+        background: "rgba(10,14,24,0.75)",
+        backdropFilter: "blur(8px)",
+        borderBottom: "1px solid #1b2340",
+      } as CSSProperties,
+
       tr: { background: "rgba(20,27,48,0.55)" } as CSSProperties,
       td: { padding: "12px 10px", fontSize: 13, color: "#c8cee0", verticalAlign: "top" } as CSSProperties,
 
@@ -682,12 +634,58 @@ export default function ResultsPage() {
         whiteSpace: "nowrap",
       } as CSSProperties,
 
-      small: { fontSize: 12, color: "#8f97ad", lineHeight: 1.5 } as CSSProperties,
+      // NEW: advice chip and button
+      adviceBox: {
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.45)",
+        borderRadius: 14,
+        padding: 10,
+      } as CSSProperties,
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
-      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
-      kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
-      kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as CSSProperties,
+      adviceTitle: { fontWeight: 950, color: "#e6e8ee", fontSize: 13 } as CSSProperties,
+      adviceText: { marginTop: 6, color: "#b7bed1", fontSize: 12, lineHeight: 1.5 } as CSSProperties,
+
+      // Drawer
+      overlay: {
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        zIndex: 50,
+        display: "grid",
+        placeItems: "center",
+        padding: 14,
+      } as CSSProperties,
+
+      drawer: {
+        width: "min(980px, 100%)",
+        borderRadius: 20,
+        border: "1px solid #1b2340",
+        background: "linear-gradient(180deg, rgba(18,24,43,0.96), rgba(12,16,28,0.96))",
+        boxShadow: "0 25px 80px rgba(0,0,0,0.55)",
+        overflow: "hidden",
+      } as CSSProperties,
+
+      drawerHead: {
+        padding: 16,
+        borderBottom: "1px solid #1b2340",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 12,
+      } as CSSProperties,
+
+      drawerBody: { padding: 16 } as CSSProperties,
+
+      split: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } as CSSProperties,
+
+      proLock: {
+        marginTop: 10,
+        padding: 12,
+        borderRadius: 14,
+        border: "1px dashed rgba(167,139,250,0.55)",
+        background: "rgba(167,139,250,0.08)",
+        color: "#e6dcff",
+      } as CSSProperties,
     };
   }, []);
 
@@ -708,13 +706,13 @@ export default function ResultsPage() {
     [leadTimeDays, safetyDays, overstockDays]
   );
 
-  const { rowsOut, warehouses, kpis, warnings, transfersEnabled } = useMemo(() => {
+  const { rowsOut, warehouses, kpis, warnings, topPlaybook } = useMemo(() => {
     const empty = {
       rowsOut: [] as RowOut[],
       warehouses: ["ALL"] as string[],
       warnings: [] as string[],
-      transfersEnabled: false,
-      kpis: { skuCount: 0, transferFirst: 0, orderNow: 0, watch: 0, reduce: 0, buyAfter: 0 },
+      kpis: { skuCount: 0, orderNow: 0, watch: 0, reduce: 0 },
+      topPlaybook: [] as string[],
     };
 
     if (!movements || !mappingV2 || !mvTypeValues) return empty;
@@ -737,98 +735,58 @@ export default function ResultsPage() {
       };
     }
 
-    // base rows
-    const base: RowOut[] = engine.lines.map((ln: LineOut) => {
+    const out: RowOut[] = engine.lines.map((ln: LineOut) => {
       const core = computeDecisionFromLine(ln, th);
+      const advice = buildAdvice(ln, th, core.decision, core.suggestedOrder, core.daysCover);
+
       return {
         sku: ln.sku,
         warehouse: ln.warehouse,
-
         onHand: core.onHand,
-
         out30d: core.out30d,
         out90d: core.out90d,
-
         avgDailyOut: core.avgDailyOut,
         daysCover: core.daysCover,
-
         reorderPoint: core.reorderPoint,
         targetStock: core.targetStock,
         suggestedOrder: core.suggestedOrder,
-
-        transferIn: [],
-        transferOut: [],
-        transferInQty: 0,
-        transferOutQty: 0,
-        purchaseAfterTransfers: core.suggestedOrder,
-        coverageByTransfer: 0,
-
         decision: core.decision,
         severity: core.severity,
-
         lastMoveISO: ln.lastMoveISO,
-
         evidence: core.evidence,
-
         profile: core.profile,
         trend: core.trend,
         cv30: core.cv30,
         activeDays30: core.activeDays30,
         loss30: core.loss30,
         lossRate30: core.lossRate30,
+        advice,
       };
     });
 
-    // Transfers enabled only when we have >1 real warehouse across dataset
-    const whList = ["ALL", ...engine.warehouses.filter((w) => w !== "ALL")];
-    const enabled = whList.length > 2; // ALL + at least 2 real WHs
-
-    const planned = enabled ? computeTransferPlan(base, th) : base;
-
-    // sort: most urgent first
-    planned.sort((a, b) => {
-      const dRank = (x: Decision) =>
-        x === "TRANSFER_FIRST"
-          ? 1
-          : x === "ORDER_NOW"
-            ? 2
-            : x === "WATCH"
-              ? 3
-              : x === "REDUCE"
-                ? 4
-                : x === "DEAD"
-                  ? 5
-                  : 6;
-
+    out.sort((a, b) => {
+      const dRank = (x: Decision) => (x === "ORDER_NOW" ? 1 : x === "WATCH" ? 2 : x === "REDUCE" ? 3 : x === "DEAD" ? 4 : 5);
       const ra = dRank(a.decision);
       const rb = dRank(b.decision);
       if (ra !== rb) return ra - rb;
       return b.severity - a.severity;
     });
 
-    const skuCount = new Set(planned.map((r) => `${r.sku}||${r.warehouse}`)).size;
+    const whList = ["ALL", ...engine.warehouses.filter((w) => w !== "ALL")];
 
     const k = {
-      skuCount,
-      transferFirst: planned.filter((r) => r.decision === "TRANSFER_FIRST").length,
-      orderNow: planned.filter((r) => r.decision === "ORDER_NOW").length,
-      watch: planned.filter((r) => r.decision === "WATCH").length,
-      reduce: planned.filter((r) => r.decision === "REDUCE").length,
-      buyAfter: planned.reduce((s, r) => s + (r.purchaseAfterTransfers ?? 0), 0),
+      skuCount: new Set(out.map((r) => `${r.sku}||${r.warehouse}`)).size,
+      orderNow: out.filter((r) => r.decision === "ORDER_NOW").length,
+      watch: out.filter((r) => r.decision === "WATCH").length,
+      reduce: out.filter((r) => r.decision === "REDUCE").length,
     };
 
-    const extraWarnings = [...engine.warnings];
-    if (!enabled) {
-      extraWarnings.push("Transfers disabled (warehouse not mapped or only one warehouse found).");
-    }
+    const playbook: string[] = [];
+    if (k.orderNow) playbook.push(`Approve urgent buys for ORDER_NOW lines (${k.orderNow}).`);
+    if (k.reduce) playbook.push(`Freeze purchasing on REDUCE lines (${k.reduce}) and plan clearance.`);
+    if (k.watch) playbook.push(`Set short review cycle for WATCH lines (${k.watch}) (e.g., every 3 days).`);
 
-    return {
-      rowsOut: planned,
-      warehouses: whList,
-      warnings: extraWarnings,
-      transfersEnabled: enabled,
-      kpis: k,
-    };
+    return { rowsOut: out, warehouses: whList, warnings: engine.warnings, kpis: k, topPlaybook: playbook };
   }, [movements, mappingV2, mvTypeValues, th]);
 
   const filtered = useMemo(() => {
@@ -859,6 +817,11 @@ export default function ResultsPage() {
     }
   }
 
+  const opened = useMemo(() => {
+    if (!openKey) return null;
+    return rowsOut.find((r) => `${r.sku}||${r.warehouse}` === openKey) ?? null;
+  }, [openKey, rowsOut]);
+
   return (
     <div style={styles.wrap}>
       <div className="bg-breathe" style={{ minHeight: "100vh" }}>
@@ -869,7 +832,7 @@ export default function ResultsPage() {
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Ops Control</div>
-                <div style={styles.subtitle}>Actionable inventory signals (V2)</div>
+                <div style={styles.subtitle}>Decisions + advice + evidence (V2)</div>
               </div>
             </div>
 
@@ -889,21 +852,18 @@ export default function ResultsPage() {
           {/* Hero */}
           <div className="anim-in anim-delay-2" style={styles.hero}>
             <span style={styles.pill}>⚡ Results</span>
-            <h1 style={styles.h1}>Ops-ready decisions with evidence</h1>
+            <h1 style={styles.h1}>Decisions you can act on — with “what to do next”</h1>
             <p style={styles.p}>
-              Reads <b style={{ color: "#e6e8ee" }}>Movements</b> + your <b style={{ color: "#e6e8ee" }}>Mapping</b> +{" "}
-              <b style={{ color: "#e6e8ee" }}>Movement Type Values</b>. Adds profile, trend, volatility, losses — and{" "}
-              <b style={{ color: "#e6e8ee" }}>Transfer-first</b> suggestions when warehouses exist.
+              This page turns your movements into a ranked action list, then adds an{" "}
+              <b style={{ color: "#e6e8ee" }}>Advice layer</b> per SKU (next steps + review cadence) + evidence chips.
             </p>
 
             {showMissing ? (
               <div style={{ marginTop: 12 }}>
                 <div style={{ ...styles.p, marginTop: 6 }}>Missing demo data. Start from Upload → Mapping → Movement Types.</div>
-
                 <div style={styles.row}>
                   <span style={styles.badgeBad}>Status: {statusText}</span>
                 </div>
-
                 <div style={{ ...styles.small, marginTop: 8 }}>
                   Mapping must include: <b>itemId</b>, <b>date</b>, <b>qty</b>, <b>movementType</b> (warehouse optional).
                 </div>
@@ -915,12 +875,7 @@ export default function ResultsPage() {
                   {warnings?.length ? (
                     <span style={{ ...styles.small, color: "#ffe9b3" }}>⚠ {warnings.slice(0, 2).join(" • ")}</span>
                   ) : (
-                    <span style={styles.small}>Engine OK • Smart signals enabled</span>
-                  )}
-                  {!transfersEnabled ? (
-                    <span style={styles.badgeWarn}>Transfers: disabled</span>
-                  ) : (
-                    <span style={styles.badgeOk}>Transfers: enabled</span>
+                    <span style={styles.small}>Engine OK • Advice layer enabled</span>
                   )}
                 </div>
 
@@ -931,10 +886,6 @@ export default function ResultsPage() {
                     <div style={styles.kpiValue}>{kpis.skuCount}</div>
                   </div>
                   <div style={styles.kpi}>
-                    <div style={styles.kpiTitle}>Transfer first</div>
-                    <div style={styles.kpiValue}>{kpis.transferFirst}</div>
-                  </div>
-                  <div style={styles.kpi}>
                     <div style={styles.kpiTitle}>Order now</div>
                     <div style={styles.kpiValue}>{kpis.orderNow}</div>
                   </div>
@@ -943,40 +894,42 @@ export default function ResultsPage() {
                     <div style={styles.kpiValue}>{kpis.watch}</div>
                   </div>
                   <div style={styles.kpi}>
-                    <div style={styles.kpiTitle}>Buy after transfers</div>
-                    <div style={styles.kpiValue}>{formatNum(kpis.buyAfter)}</div>
+                    <div style={styles.kpiTitle}>Reduce</div>
+                    <div style={styles.kpiValue}>{kpis.reduce}</div>
                   </div>
                 </div>
 
-                {/* Controls */}
-                <div style={styles.grid2}>
+                {/* NEW: Playbook summary */}
+                <div style={styles.grid3}>
+                  <div style={styles.cardPad}>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>Today’s playbook</div>
+                    <div style={{ ...styles.small, marginTop: 8 }}>
+                      {topPlaybook.length ? (
+                        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: "#c8cee0" }}>
+                          {topPlaybook.slice(0, 3).map((x, i) => (
+                            <li key={i}>{x}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        "No urgent actions. Review healthy lines weekly."
+                      )}
+                    </div>
+                  </div>
+
                   <div style={styles.cardPad}>
                     <div style={{ fontWeight: 950, fontSize: 16 }}>Policy thresholds</div>
-                    <div style={{ ...styles.small, marginTop: 6 }}>You control these — no random assumptions.</div>
+                    <div style={{ ...styles.small, marginTop: 6 }}>
+                      You control these — no random assumptions. Overstock default = <b>90</b>.
+                    </div>
 
                     <div style={styles.row}>
-                      <button
-                        className="btn-glow"
-                        type="button"
-                        style={preset === "CONSERVATIVE" ? styles.btnPrimary : styles.btnGhost}
-                        onClick={() => applyPreset("CONSERVATIVE")}
-                      >
+                      <button className="btn-glow" type="button" style={preset === "CONSERVATIVE" ? styles.btnPrimary : styles.btnGhost} onClick={() => applyPreset("CONSERVATIVE")}>
                         Conservative
                       </button>
-                      <button
-                        className="btn-glow"
-                        type="button"
-                        style={preset === "BALANCED" ? styles.btnPrimary : styles.btnGhost}
-                        onClick={() => applyPreset("BALANCED")}
-                      >
+                      <button className="btn-glow" type="button" style={preset === "BALANCED" ? styles.btnPrimary : styles.btnGhost} onClick={() => applyPreset("BALANCED")}>
                         Balanced
                       </button>
-                      <button
-                        className="btn-glow"
-                        type="button"
-                        style={preset === "AGGRESSIVE" ? styles.btnPrimary : styles.btnGhost}
-                        onClick={() => applyPreset("AGGRESSIVE")}
-                      >
+                      <button className="btn-glow" type="button" style={preset === "AGGRESSIVE" ? styles.btnPrimary : styles.btnGhost} onClick={() => applyPreset("AGGRESSIVE")}>
                         Aggressive
                       </button>
                       <span style={styles.small}>
@@ -987,40 +940,19 @@ export default function ResultsPage() {
                     <div style={styles.controlGrid}>
                       <div style={styles.field}>
                         <div style={styles.label}>Lead time days</div>
-                        <input
-                          style={styles.input}
-                          type="number"
-                          value={leadTimeDays}
-                          min={0}
-                          max={365}
-                          onChange={(e) => setLeadTimeDays(clampInt(Number(e.target.value), 0, 365))}
-                        />
+                        <input style={styles.input} type="number" value={leadTimeDays} min={0} max={365} onChange={(e) => setLeadTimeDays(clampInt(Number(e.target.value), 0, 365))} />
                         <div style={styles.small}>Used in reorder point.</div>
                       </div>
 
                       <div style={styles.field}>
                         <div style={styles.label}>Safety days</div>
-                        <input
-                          style={styles.input}
-                          type="number"
-                          value={safetyDays}
-                          min={0}
-                          max={365}
-                          onChange={(e) => setSafetyDays(clampInt(Number(e.target.value), 0, 365))}
-                        />
+                        <input style={styles.input} type="number" value={safetyDays} min={0} max={365} onChange={(e) => setSafetyDays(clampInt(Number(e.target.value), 0, 365))} />
                         <div style={styles.small}>Buffer against variability.</div>
                       </div>
 
                       <div style={styles.field}>
                         <div style={styles.label}>Overstock policy (days)</div>
-                        <input
-                          style={styles.input}
-                          type="number"
-                          value={overstockDays}
-                          min={1}
-                          max={3650}
-                          onChange={(e) => setOverstockDays(clampInt(Number(e.target.value), 1, 3650))}
-                        />
+                        <input style={styles.input} type="number" value={overstockDays} min={1} max={3650} onChange={(e) => setOverstockDays(clampInt(Number(e.target.value), 1, 3650))} />
                         <div style={styles.small}>Above this cover → Reduce.</div>
                       </div>
                     </div>
@@ -1028,7 +960,7 @@ export default function ResultsPage() {
 
                   <div style={styles.cardPad}>
                     <div style={{ fontWeight: 950, fontSize: 16 }}>Filters</div>
-                    <div style={{ ...styles.small, marginTop: 6 }}>Narrow down to a warehouse / decision / SKU search.</div>
+                    <div style={{ ...styles.small, marginTop: 6 }}>Narrow down to warehouse / decision / SKU search.</div>
 
                     <div style={styles.controlGrid}>
                       <div style={styles.field}>
@@ -1040,14 +972,13 @@ export default function ResultsPage() {
                             </option>
                           ))}
                         </select>
-                        <div style={styles.small}>Transfers need warehouses.</div>
+                        <div style={styles.small}>Warehouse is optional in mapping.</div>
                       </div>
 
                       <div style={styles.field}>
                         <div style={styles.label}>Decision</div>
                         <select style={styles.input} value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as any)}>
                           <option value="ALL">ALL</option>
-                          <option value="TRANSFER_FIRST">TRANSFER_FIRST</option>
                           <option value="ORDER_NOW">ORDER_NOW</option>
                           <option value="WATCH">WATCH</option>
                           <option value="REDUCE">REDUCE</option>
@@ -1059,12 +990,7 @@ export default function ResultsPage() {
 
                       <div style={styles.field}>
                         <div style={styles.label}>Search</div>
-                        <input
-                          style={styles.input}
-                          value={search}
-                          onChange={(e) => setSearch(e.target.value)}
-                          placeholder="SKU / Warehouse..."
-                        />
+                        <input style={styles.input} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SKU / Warehouse..." />
                         <div style={styles.small}>Case-insensitive contains.</div>
                       </div>
                     </div>
@@ -1078,7 +1004,7 @@ export default function ResultsPage() {
                 {/* Table */}
                 <div style={styles.tableWrap}>
                   <table style={styles.table}>
-                    <thead>
+                    <thead style={styles.thead as any}>
                       <tr>
                         <th style={styles.th}>Decision</th>
                         <th style={styles.th}>SKU</th>
@@ -1088,15 +1014,21 @@ export default function ResultsPage() {
                         <th style={styles.th}>Cover</th>
                         <th style={styles.th}>ROP</th>
                         <th style={styles.th}>Suggested</th>
-                        <th style={styles.th}>Buy after</th>
+                        <th style={styles.th}>Advice</th>
                         <th style={styles.th}>Evidence</th>
                       </tr>
                     </thead>
+
                     <tbody>
                       {filtered.slice(0, 250).map((r, idx) => {
+                        const key = `${r.sku}||${r.warehouse}`;
                         const tone = decisionTone(r.decision);
+
+                        const showAll = !!expandedEvidence[key];
+                        const chips = showAll ? r.evidence : r.evidence.slice(0, 4);
+
                         return (
-                          <tr key={`${r.sku}-${r.warehouse}-${idx}`} style={styles.tr}>
+                          <tr key={`${key}-${idx}`} style={styles.tr}>
                             <td style={styles.td}>
                               <span
                                 style={{
@@ -1108,6 +1040,17 @@ export default function ResultsPage() {
                               >
                                 {decisionLabel(r.decision)} • {r.severity}
                               </span>
+
+                              <div style={{ marginTop: 10 }}>
+                                <button
+                                  className="btn-glow"
+                                  type="button"
+                                  style={{ ...styles.btnSoft, padding: "8px 10px", borderRadius: 10, fontWeight: 900 }}
+                                  onClick={() => setOpenKey(key)}
+                                >
+                                  View details
+                                </button>
+                              </div>
                             </td>
 
                             <td style={styles.td}>
@@ -1121,9 +1064,7 @@ export default function ResultsPage() {
 
                             <td style={styles.td}>{formatNum(r.onHand)}</td>
                             <td style={styles.td}>{formatNum(r.out30d)}</td>
-
                             <td style={styles.td}>{r.daysCover >= 9999 ? "∞" : `${formatNum(r.daysCover)} d`}</td>
-
                             <td style={styles.td}>{formatNum(r.reorderPoint)}</td>
 
                             <td style={styles.td}>
@@ -1131,16 +1072,29 @@ export default function ResultsPage() {
                               <div style={styles.small}>Target: {formatNum(r.targetStock)}</div>
                             </td>
 
+                            {/* NEW: Advice column */}
                             <td style={styles.td}>
-                              <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{formatNum(r.purchaseAfterTransfers)}</div>
-                              <div style={styles.small}>
-                                {r.transferInQty > 0 ? `Covered: ${percent(r.coverageByTransfer)}` : "Covered: 0%"}
+                              <div style={styles.adviceBox}>
+                                <div style={styles.adviceTitle}>{r.advice.headline}</div>
+                                <div style={styles.adviceText}>
+                                  • {r.advice.bullets[0] ?? "—"}
+                                  <br />
+                                  <span style={{ color: "#8f97ad" }}>
+                                    Next review: {r.advice.nextReviewDays}d • Confidence: {r.advice.confidence}
+                                  </span>
+                                </div>
+
+                                {!isPro && r.advice.proLockedBullets?.length ? (
+                                  <div style={{ marginTop: 8, ...styles.small, color: "#e6dcff" }}>
+                                    🔒 Pro adds deeper playbook (transfer/alerts/what-if)
+                                  </div>
+                                ) : null}
                               </div>
                             </td>
 
                             <td style={styles.td}>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                                {r.evidence.slice(0, 8).map((c, i) => {
+                                {chips.map((c, i) => {
                                   const ct = chipTone(c.tone);
                                   return (
                                     <span
@@ -1156,6 +1110,17 @@ export default function ResultsPage() {
                                     </span>
                                   );
                                 })}
+
+                                {r.evidence.length > 4 ? (
+                                  <button
+                                    className="btn-glow"
+                                    type="button"
+                                    style={{ ...styles.btnGhost, padding: "7px 10px", borderRadius: 999, fontWeight: 900 }}
+                                    onClick={() => setExpandedEvidence((s) => ({ ...s, [key]: !s[key] }))}
+                                  >
+                                    {showAll ? "Less" : `More (${r.evidence.length - 4})`}
+                                  </button>
+                                ) : null}
                               </div>
                             </td>
                           </tr>
@@ -1165,12 +1130,115 @@ export default function ResultsPage() {
                   </table>
 
                   <div style={{ ...styles.small, marginTop: 10 }}>
-                    Note: Showing max 250 rows for speed. Sorting: Transfer First → Order Now → Watch → Reduce → Dead → Healthy.
+                    Note: Showing max 250 rows for speed. Priority: Order Now → Watch → Reduce → Dead → Healthy.
                   </div>
                 </div>
               </div>
             )}
           </div>
+
+          {/* Drawer / Modal (Details + Advice + Pro tease) */}
+          {opened ? (
+            <div style={styles.overlay} onClick={() => setOpenKey(null)}>
+              <div style={styles.drawer} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.drawerHead}>
+                  <div>
+                    <div style={{ fontWeight: 950, fontSize: 18, color: "#e6e8ee" }}>
+                      {opened.sku} • <span style={{ color: "#aab1c4" }}>{opened.warehouse}</span>
+                    </div>
+                    <div style={{ marginTop: 6, color: "#b7bed1", lineHeight: 1.6 }}>
+                      <b style={{ color: "#e6e8ee" }}>{decisionLabel(opened.decision)}</b> • severity {opened.severity} •{" "}
+                      {opened.lastMoveISO ? `Last move ${opened.lastMoveISO}` : "Last move —"}
+                    </div>
+                  </div>
+
+                  <button className="btn-glow" type="button" style={styles.btnGhost} onClick={() => setOpenKey(null)}>
+                    Close
+                  </button>
+                </div>
+
+                <div style={styles.drawerBody}>
+                  <div style={styles.split} className="drawer-split">
+                    <div style={{ ...styles.cardPad }}>
+                      <div style={{ fontWeight: 950 }}>Key numbers</div>
+                      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <KV k="On hand" v={formatNum(opened.onHand)} />
+                        <KV k="Out (30d)" v={formatNum(opened.out30d)} />
+                        <KV k="Avg/day OUT" v={formatNum(opened.avgDailyOut)} />
+                        <KV k="Cover" v={opened.daysCover >= 9999 ? "∞" : `${formatNum(opened.daysCover)} d`} />
+                        <KV k="ROP" v={formatNum(opened.reorderPoint)} />
+                        <KV k="Target stock" v={formatNum(opened.targetStock)} />
+                        <KV k="Suggested order" v={formatNum(opened.suggestedOrder)} />
+                        <KV k="Review cadence" v={`${opened.advice.nextReviewDays} days`} />
+                      </div>
+
+                      <div style={{ marginTop: 12, ...styles.small }}>
+                        Confidence is based on active demand days + volatility. It helps you know how much to trust the signal.
+                      </div>
+                    </div>
+
+                    <div style={{ ...styles.cardPad }}>
+                      <div style={{ fontWeight: 950 }}>What to do next</div>
+                      <div style={{ marginTop: 10, color: "#b7bed1", lineHeight: 1.7 }}>
+                        <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{opened.advice.headline}</div>
+                        <ul style={{ margin: "10px 0 0", paddingLeft: 18 }}>
+                          {opened.advice.bullets.slice(0, 6).map((b, i) => (
+                            <li key={i} style={{ marginBottom: 6 }}>
+                              {b}
+                            </li>
+                          ))}
+                        </ul>
+
+                        {!isPro && opened.advice.proLockedBullets?.length ? (
+                          <div style={styles.proLock}>
+                            <div style={{ fontWeight: 950 }}>🔒 Pro guidance (locked)</div>
+                            <div style={{ marginTop: 8, ...styles.small, color: "#e6dcff" }}>
+                              {opened.advice.proLockedBullets.slice(0, 3).map((x, i) => (
+                                <div key={i}>• {x}</div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ fontWeight: 950 }}>Evidence</div>
+                          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                            {opened.evidence.map((c, i) => {
+                              const ct = chipTone(c.tone);
+                              return (
+                                <span
+                                  key={i}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    padding: "6px 10px",
+                                    borderRadius: 999,
+                                    border: `1px solid ${ct.border}`,
+                                    background: ct.bg,
+                                    color: ct.color,
+                                    fontSize: 12,
+                                    fontWeight: 900,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {c.k}: {c.v}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 12, ...styles.small }}>
+                    Tip: If warehouse isn’t mapped, all lines show under a default warehouse. That’s allowed.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {/* Global styles */}
           <style jsx global>{`
@@ -1217,6 +1285,12 @@ export default function ResultsPage() {
               filter: drop-shadow(0 10px 20px rgba(110, 231, 255, 0.2));
             }
 
+            @media (max-width: 1050px) {
+              .drawer-split {
+                grid-template-columns: 1fr !important;
+              }
+            }
+
             @media (prefers-reduced-motion: reduce) {
               .anim-in,
               .bg-breathe,
@@ -1230,6 +1304,19 @@ export default function ResultsPage() {
           `}</style>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* =========================
+   Small UI helpers
+========================= */
+
+function KV({ k, v }: { k: string; v: string }) {
+  return (
+    <div style={{ padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
+      <div style={{ fontSize: 12, color: "#aab1c4" }}>{k}</div>
+      <div style={{ fontSize: 16, fontWeight: 950, marginTop: 6, color: "#e6e8ee" }}>{v}</div>
     </div>
   );
 }
