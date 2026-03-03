@@ -1,7 +1,7 @@
 // inventory-app/lib/engineV2.ts
 // Core analytics engine for V2 movements (ledger-first).
 // Pure functions only (no storage, no UI).
-// Supports negative qty, manufacturing losses (scrap) as separate metric,
+// Supports negative qty, losses (scrap), adjustments, transfers,
 // and both Calendar Avg + Active Days Avg for demand.
 
 import type { DemoRow, MovementsMapping, MovementTypeValueMapping } from "@/lib/demoStore";
@@ -13,29 +13,19 @@ import type { DemoRow, MovementsMapping, MovementTypeValueMapping } from "@/lib/
 export type MovementClass = "IN" | "OUT" | "OTHER";
 
 export type EngineParams = {
-  // windows (days)
   w7: number;
   w30: number;
   w90: number;
 
-  // How to treat warehouse when missing
   defaultWarehouse: string;
 
-  // Which movement values are "loss" (scrap/quality/adjust negative etc.)
-  // NOTE: we classify movement types using MovementTypeValueMapping first.
-  // Loss tags are applied by raw movementType token matching inside OTHER.
-  lossTokens: string[]; // e.g. ["scrap", "scr", "quality_reject", "waste"]
+  // fallback tokens if user didn't bucket LOSS properly
+  lossTokens: string[];
 
-  // If qty is negative in raw file:
-  // We'll use ABS(qty) and apply sign based on MovementClass,
-  // because many ERPs store OUT as negative already.
   useAbsQty: boolean;
-
-  // Minimum rows to consider SKU valid
   minRowsPerSkuWh: number;
 
-  // For intermittent/lumpy classification
-  intermittentThreshold: number; // e.g. 0.2 (20% active days in window)
+  intermittentThreshold: number;
 };
 
 export type EngineKpis = {
@@ -61,10 +51,8 @@ export type LineOut = {
   sku: string;
   warehouse: string;
 
-  // Stock snapshot (net over all time in file)
   onHand: number;
 
-  // Window totals
   out7: number;
   out30: number;
   out90: number;
@@ -73,33 +61,24 @@ export type LineOut = {
   in30: number;
   in90: number;
 
-  // Loss (scrap etc.) — counts as stock decrease but NOT demand
   loss30: number;
   loss90: number;
 
-  // Demand rates
-  avgDailyOutCalendar30: number; // out30 / 30
-  avgDailyOutActive30: number; // out30 / activeDemandDays30
-  activeDemandDays30: number; // count of unique days with OUT > 0
+  avgDailyOutCalendar30: number;
+  avgDailyOutActive30: number;
+  activeDemandDays30: number;
 
-  // Volatility
-  stdDailyOut30: number; // stddev across daily OUT series (calendar)
-  cv30: number; // std/mean (calendar mean)
+  stdDailyOut30: number;
+  cv30: number;
 
-  // Trend (compare last 30 vs prev 30 within 90 horizon)
-  trend30vsPrev30: number; // -1..+1
+  trend30vsPrev30: number;
 
-  // Last activity
   lastMoveISO: string | null;
   lastOutISO: string | null;
 
-  // Profile
   profile: DemandProfile;
-
-  // Health notes (for UI evidence)
   notes: string[];
 
-  // Debug counters (optional)
   _meta?: {
     rows: number;
     hasWarehouseCol: boolean;
@@ -114,7 +93,7 @@ export type EngineResult = {
   params: EngineParams;
 
   kpis: EngineKpis;
-  warehouses: string[]; // includes "ALL" only if you want; we keep real ones + default
+  warehouses: string[];
   lines: LineOut[];
 };
 
@@ -128,7 +107,7 @@ export function getDefaultEngineParams(): EngineParams {
     w30: 30,
     w90: 90,
     defaultWarehouse: "ALL",
-    lossTokens: ["scrap", "waste", "reject", "quality", "loss", "damage"],
+    lossTokens: ["scrap", "waste", "reject", "quality", "loss", "damage", "expired", "expiry"],
     useAbsQty: true,
     minRowsPerSkuWh: 2,
     intermittentThreshold: 0.2,
@@ -139,11 +118,11 @@ export function getDefaultEngineParams(): EngineParams {
    Utils
 ========================================================= */
 
-function normToken(x: string): string {
+function normToken(x: any): string {
   return (x ?? "").toString().trim().toLowerCase();
 }
 
-function parseDateMs(x: string): number | null {
+function parseDateMs(x: any): number | null {
   const s = (x ?? "").toString().trim();
   if (!s) return null;
   const t = Date.parse(s);
@@ -174,28 +153,60 @@ function uniqSorted(arr: string[], pinFirst?: string): string[] {
   return out;
 }
 
-/* =========================================================
-   Movement classification
-========================================================= */
-
-export function classifyMovement(rawType: string, mv: MovementTypeValueMapping): MovementClass {
-  const t = normToken(rawType);
-  if (!t) return "OTHER";
-
-  const inSet = new Set((mv?.inValues ?? []).map(normToken));
-  const outSet = new Set((mv?.outValues ?? []).map(normToken));
-
-  if (inSet.has(t)) return "IN";
-  if (outSet.has(t)) return "OUT";
-  return "OTHER";
+function toSetCI(list: any): Set<string> {
+  const s = new Set<string>();
+  if (!Array.isArray(list)) return s;
+  for (const v of list) {
+    const t = normToken(v);
+    if (t) s.add(t);
+  }
+  return s;
 }
 
-function isLossOther(rawType: string, params: EngineParams): boolean {
+/* =========================================================
+   Movement classification (FAST + BUCKET-AWARE)
+========================================================= */
+
+type Classifier = {
+  inSet: Set<string>;
+  outSet: Set<string>;
+  transferSet: Set<string>;
+  lossSet: Set<string>;   // scrapLossValues from mapping UI
+  adjustSet: Set<string>; // adjustValues from mapping UI
+  otherSet: Set<string>;
+};
+
+function buildClassifier(mv: MovementTypeValueMapping): Classifier {
+  return {
+    inSet: toSetCI((mv as any)?.inValues ?? []),
+    outSet: toSetCI((mv as any)?.outValues ?? []),
+    transferSet: toSetCI((mv as any)?.transferValues ?? []),
+    lossSet: toSetCI((mv as any)?.scrapLossValues ?? []),
+    adjustSet: toSetCI((mv as any)?.adjustValues ?? []),
+    otherSet: toSetCI((mv as any)?.otherValues ?? []),
+  };
+}
+
+function classifyWithBuckets(rawType: any, c: Classifier) {
+  const t = normToken(rawType);
+  if (!t) return { cls: "OTHER" as MovementClass, isLoss: false, isAdjust: false, isTransfer: false };
+
+  if (c.inSet.has(t)) return { cls: "IN" as MovementClass, isLoss: false, isAdjust: false, isTransfer: false };
+  if (c.outSet.has(t)) return { cls: "OUT" as MovementClass, isLoss: false, isAdjust: false, isTransfer: false };
+
+  // Everything else is OTHER, but we tag special buckets
+  const isTransfer = c.transferSet.has(t);
+  const isLoss = c.lossSet.has(t);
+  const isAdjust = c.adjustSet.has(t);
+
+  return { cls: "OTHER" as MovementClass, isLoss, isAdjust, isTransfer };
+}
+
+function isLossFallbackByToken(rawType: any, params: EngineParams): boolean {
   const t = normToken(rawType);
   if (!t) return false;
-  const lossSet = new Set((params.lossTokens ?? []).map(normToken));
-  // match contains to be forgiving: "quality_scrap", "scrap-issue", etc.
-  for (const k of lossSet) {
+  const loss = toSetCI(params.lossTokens ?? []);
+  for (const k of loss) {
     if (k && t.includes(k)) return true;
   }
   return false;
@@ -212,11 +223,11 @@ function addDaily(series: DailySeries, dayISO: string, v: number) {
 }
 
 function buildCalendarDays(endMs: number, days: number): string[] {
-  // inclusive end day
   const out: string[] = [];
   const endDay = new Date(endMs);
   endDay.setUTCHours(0, 0, 0, 0);
   const end0 = endDay.getTime();
+
   for (let i = days - 1; i >= 0; i--) {
     const t = end0 - i * 24 * 60 * 60 * 1000;
     out.push(msToISODate(t));
@@ -235,15 +246,12 @@ function meanStdFromCalendar(series: DailySeries, calendar: string[]): { mean: n
       return acc + dx * dx;
     }, 0) / vals.length;
 
-  const std = Math.sqrt(variance);
-  return { mean, std };
+  return { mean, std: Math.sqrt(variance) };
 }
 
 function activeDaysCount(series: DailySeries, calendar: string[]): number {
   let c = 0;
-  for (const d of calendar) {
-    if ((series.get(d) ?? 0) > 0) c++;
-  }
+  for (const d of calendar) if ((series.get(d) ?? 0) > 0) c++;
   return c;
 }
 
@@ -251,23 +259,20 @@ function activeDaysCount(series: DailySeries, calendar: string[]): number {
    Trend + Profile
 ========================================================= */
 
-function trend30vsPrev30(outSeries: DailySeries, endMs: number, w30: number): number {
-  // Compare last 30 days vs previous 30 days average.
+function trend30vsPrev30(outSeries90: DailySeries, endMs: number, w30: number): number {
   const calLast = buildCalendarDays(endMs, w30);
   const calPrev = buildCalendarDays(endMs - w30 * 24 * 60 * 60 * 1000, w30);
 
-  const sumLast = calLast.reduce((a, d) => a + (outSeries.get(d) ?? 0), 0);
-  const sumPrev = calPrev.reduce((a, d) => a + (outSeries.get(d) ?? 0), 0);
+  const sumLast = calLast.reduce((a, d) => a + (outSeries90.get(d) ?? 0), 0);
+  const sumPrev = calPrev.reduce((a, d) => a + (outSeries90.get(d) ?? 0), 0);
 
   const avgLast = sumLast / w30;
   const avgPrev = sumPrev / w30;
 
   if (avgLast === 0 && avgPrev === 0) return 0;
 
-  // normalized delta -> [-1..+1]
   const denom = Math.max(avgLast, avgPrev, 1e-9);
-  const raw = (avgLast - avgPrev) / denom;
-  return clamp(raw, -1, 1);
+  return clamp((avgLast - avgPrev) / denom, -1, 1);
 }
 
 function classifyProfile(args: {
@@ -286,18 +291,12 @@ function classifyProfile(args: {
 
   const activeRatio = activeDays30 / Math.max(1, w30);
 
-  // intermittent: few active days
   if (activeRatio <= intermittentThreshold) {
-    // lumpy: intermittent + high variability
-    if (cv30 >= 1.2) return "LUMPY";
-    return "INTERMITTENT";
+    return cv30 >= 1.2 ? "LUMPY" : "INTERMITTENT";
   }
 
-  // stable vs declining
   if (trend <= -0.35) return "DECLINING";
   if (cv30 <= 0.6) return "STABLE";
-
-  // default
   return "STABLE";
 }
 
@@ -320,7 +319,6 @@ export function runEngineV2(input: {
   const headers = movements?.headers ?? [];
   const rows = movements?.rows ?? [];
 
-  // Basic validation
   const required = [mapping.itemId, mapping.date, mapping.qty, mapping.movementType].filter(Boolean);
   if (required.length !== 4) errors.push("Missing required mapping fields (itemId/date/qty/movementType).");
 
@@ -353,65 +351,53 @@ export function runEngineV2(input: {
     };
   }
 
-  // Determine time anchor: max date in dataset (not "now")
+  // Build classifier once (FAST)
+  const classifier = buildClassifier(mvTypes);
+
+  // Determine time anchor (max date in dataset)
   let maxT: number | null = null;
   for (const r of rows) {
-    const t = parseDateMs((r[mapping.date] ?? "").toString());
+    const t = parseDateMs(r[mapping.date]);
     if (t === null) continue;
     maxT = maxT === null ? t : Math.max(maxT, t);
   }
   if (maxT === null) {
-    warnings.push("Could not parse any dates. Windows (7/30/90) will behave as zeroed.");
+    warnings.push("Could not parse any dates. Using now as anchor; windows may be inaccurate.");
     maxT = Date.now();
   }
 
-  const w7ms = params.w7 * 24 * 60 * 60 * 1000;
-  const w30ms = params.w30 * 24 * 60 * 60 * 1000;
-  const w90ms = params.w90 * 24 * 60 * 60 * 1000;
-
-  const t7 = maxT - w7ms;
-  const t30 = maxT - w30ms;
-  const t90 = maxT - w90ms;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const t7 = maxT - params.w7 * dayMs;
+  const t30 = maxT - params.w30 * dayMs;
+  const t90 = maxT - params.w90 * dayMs;
 
   const hasWarehouseCol = !!mapping.warehouse;
 
-  // Aggregation per sku||wh
   type Agg = {
     sku: string;
     wh: string;
 
     onHand: number;
 
-    in7: number;
-    in30: number;
-    in90: number;
+    in7: number; in30: number; in90: number;
+    out7: number; out30: number; out90: number;
 
-    out7: number;
-    out30: number;
-    out90: number;
-
-    loss30: number;
-    loss90: number;
+    loss30: number; loss90: number;
 
     lastMove: number | null;
     lastOut: number | null;
 
-    // daily series (calendar)
-    outSeries30: DailySeries; // day -> out qty
-    outSeries90: DailySeries; // day -> out qty
+    outSeries30: DailySeries;
+    outSeries90: DailySeries;
 
-    // history marker
     hasBefore30: boolean;
-
     rows: number;
   };
 
   const map = new Map<string, Agg>();
   const whSet = new Set<string>();
 
-  function key(sku: string, wh: string) {
-    return `${sku}||${wh}`;
-  }
+  const key = (sku: string, wh: string) => `${sku}||${wh}`;
 
   for (const r of rows) {
     const sku = (r[mapping.itemId] ?? "").toString().trim();
@@ -421,29 +407,27 @@ export function runEngineV2(input: {
     const wh = whRaw || params.defaultWarehouse;
     if (wh) whSet.add(wh);
 
-    const t = parseDateMs((r[mapping.date] ?? "").toString());
-    const qtyRaw = (r[mapping.qty] ?? "").toString();
-    const qtyN = safeNumber(qtyRaw);
+    const t = parseDateMs(r[mapping.date]);
+    const qtyN = safeNumber(r[mapping.qty]);
     const qty = params.useAbsQty ? Math.abs(qtyN) : qtyN;
 
-    const mt = (r[mapping.movementType] ?? "").toString().trim();
-    const cls = classifyMovement(mt, mvTypes);
+    const mtRaw = (r[mapping.movementType] ?? "").toString().trim();
+    const tag = classifyWithBuckets(mtRaw, classifier);
+
+    // LOSS fallback by token if user didn't bucket loss values
+    const isLoss = tag.isLoss || (!tag.isAdjust && !tag.isTransfer && isLossFallbackByToken(mtRaw, params));
+    const isAdjust = tag.isAdjust;
+    const isTransfer = tag.isTransfer;
 
     const k = key(sku, wh);
     const a: Agg =
       map.get(k) ??
       ({
-        sku,
-        wh,
+        sku, wh,
         onHand: 0,
-        in7: 0,
-        in30: 0,
-        in90: 0,
-        out7: 0,
-        out30: 0,
-        out90: 0,
-        loss30: 0,
-        loss90: 0,
+        in7: 0, in30: 0, in90: 0,
+        out7: 0, out30: 0, out90: 0,
+        loss30: 0, loss90: 0,
         lastMove: null,
         lastOut: null,
         outSeries30: new Map(),
@@ -452,60 +436,58 @@ export function runEngineV2(input: {
         rows: 0,
       } as Agg);
 
-    // Net stock logic:
-    // IN adds, OUT subtracts, OTHER ignored (except losses: treat as stock decrease but not demand)
-    if (cls === "IN") a.onHand += qty;
-    if (cls === "OUT") a.onHand -= qty;
-
-    // Loss inside OTHER bucket by token matching (scrap, reject...)
-    const loss = cls === "OTHER" && isLossOther(mt, params);
-    if (loss) {
-      a.onHand -= qty; // stock decrease
+    // Stock impact rules:
+    // IN adds, OUT subtracts.
+    // LOSS subtracts (but not demand).
+    // ADJUST: treat as stock impact based on sign of qtyN (if user didn't abs, keep sign)
+    // TRANSFER: stock-neutral in demo (ignore)
+    if (tag.cls === "IN") a.onHand += qty;
+    else if (tag.cls === "OUT") a.onHand -= qty;
+    else if (isLoss) a.onHand -= qty;
+    else if (isAdjust) {
+      // If file has signed qty, respect sign; if we useAbsQty, assume adjust decreases unless qtyN shows sign
+      const signed = params.useAbsQty ? (qtyN < 0 ? -qty : qty) : qty;
+      a.onHand += signed;
+    } else if (isTransfer) {
+      // ignore in demo (stock-neutral)
     }
 
-    // Update windows by date
+    // Windows + series
     if (t !== null) {
       if (t >= t7) {
-        if (cls === "IN") a.in7 += qty;
-        if (cls === "OUT") a.out7 += qty;
+        if (tag.cls === "IN") a.in7 += qty;
+        if (tag.cls === "OUT") a.out7 += qty;
       }
       if (t >= t30) {
-        if (cls === "IN") a.in30 += qty;
-        if (cls === "OUT") a.out30 += qty;
-        if (loss) a.loss30 += qty;
+        if (tag.cls === "IN") a.in30 += qty;
+        if (tag.cls === "OUT") a.out30 += qty;
+        if (isLoss) a.loss30 += qty;
       } else {
-        // history marker (for "NEW" profile)
-        if (cls === "OUT") a.hasBefore30 = true;
+        if (tag.cls === "OUT") a.hasBefore30 = true;
       }
       if (t >= t90) {
-        if (cls === "IN") a.in90 += qty;
-        if (cls === "OUT") a.out90 += qty;
-        if (loss) a.loss90 += qty;
+        if (tag.cls === "IN") a.in90 += qty;
+        if (tag.cls === "OUT") a.out90 += qty;
+        if (isLoss) a.loss90 += qty;
       }
 
-      // daily series (calendar)
       const day = msToISODate(t);
-
-      if (cls === "OUT") {
-        // build both 30 & 90 series for stats/trend
+      if (tag.cls === "OUT") {
         if (t >= t30) addDaily(a.outSeries30, day, qty);
         if (t >= t90) addDaily(a.outSeries90, day, qty);
       }
 
-      // last moves
       a.lastMove = a.lastMove === null ? t : Math.max(a.lastMove, t);
-      if (cls === "OUT") a.lastOut = a.lastOut === null ? t : Math.max(a.lastOut, t);
+      if (tag.cls === "OUT") a.lastOut = a.lastOut === null ? t : Math.max(a.lastOut, t);
     }
 
     a.rows += 1;
     map.set(k, a);
   }
 
-  // Build output lines
-  const lines: LineOut[] = [];
-
   const cal30 = buildCalendarDays(maxT, params.w30);
-  const cal90 = buildCalendarDays(maxT, params.w90);
+
+  const lines: LineOut[] = [];
 
   for (const a of map.values()) {
     if (a.rows < params.minRowsPerSkuWh) continue;
@@ -514,8 +496,7 @@ export function runEngineV2(input: {
     const activeDays30 = activeDaysCount(a.outSeries30, cal30);
 
     const avgCalendar30 = a.out30 / Math.max(1, params.w30);
-    const avgActive30 = a.out30 / Math.max(1, activeDays30); // if 0 => handled by max
-
+    const avgActive30 = a.out30 / Math.max(1, activeDays30);
     const cv = mean > 0 ? std / mean : 0;
 
     const tr = trend30vsPrev30(a.outSeries90, maxT, params.w30);
@@ -531,15 +512,11 @@ export function runEngineV2(input: {
     });
 
     const notes: string[] = [];
-
-    if (a.onHand < 0) notes.push("Negative on-hand (check movements / starting stock).");
-    if (profile === "INTERMITTENT") notes.push("Intermittent demand (few active days).");
+    if (a.onHand < 0) notes.push("Negative on-hand (check movements / opening stock).");
+    if (profile === "INTERMITTENT") notes.push("Intermittent demand.");
     if (profile === "LUMPY") notes.push("Lumpy demand (high variability).");
     if (profile === "DECLINING") notes.push("Demand declining vs previous period.");
     if (a.loss30 > 0) notes.push("Loss detected (scrap/reject).");
-
-    const lastMoveISO = a.lastMove ? msToISODate(a.lastMove) : null;
-    const lastOutISO = a.lastOut ? msToISODate(a.lastOut) : null;
 
     lines.push({
       sku: a.sku,
@@ -567,8 +544,8 @@ export function runEngineV2(input: {
 
       trend30vsPrev30: tr,
 
-      lastMoveISO,
-      lastOutISO,
+      lastMoveISO: a.lastMove ? msToISODate(a.lastMove) : null,
+      lastOutISO: a.lastOut ? msToISODate(a.lastOut) : null,
 
       profile,
       notes,
@@ -577,30 +554,22 @@ export function runEngineV2(input: {
     });
   }
 
-  // KPIs
-  const skuCount = new Set(lines.map((x) => `${x.sku}||${x.warehouse}`)).size;
   const totalOnHand = lines.reduce((s, x) => s + x.onHand, 0);
   const out7 = lines.reduce((s, x) => s + x.out7, 0);
   const out30 = lines.reduce((s, x) => s + x.out30, 0);
   const out90 = lines.reduce((s, x) => s + x.out90, 0);
   const loss30 = lines.reduce((s, x) => s + x.loss30, 0);
   const loss90 = lines.reduce((s, x) => s + x.loss90, 0);
-
   const denom = out30 + loss30;
   const lossRate30 = denom > 0 ? loss30 / denom : 0;
 
   const warehouses = uniqSorted(Array.from(whSet), params.defaultWarehouse);
 
-  if (!hasWarehouseCol) {
-    warnings.push("Warehouse column not mapped. Results are aggregated under default warehouse.");
-  }
+  if (!hasWarehouseCol) warnings.push("Warehouse not mapped. Results aggregated under default warehouse.");
 
-  // If movement type mapping seems weak
-  const inCount = (mvTypes?.inValues ?? []).length;
-  const outCount = (mvTypes?.outValues ?? []).length;
-  if (inCount === 0 || outCount === 0) {
-    warnings.push("Movement type value mapping has empty IN or OUT list. Demand/stock signals may be wrong.");
-  }
+  const inCount = ((mvTypes as any)?.inValues ?? []).length;
+  const outCount = ((mvTypes as any)?.outValues ?? []).length;
+  if (inCount === 0 || outCount === 0) warnings.push("IN/OUT mapping is empty. Signals may be wrong.");
 
   return {
     ok: true,
@@ -609,7 +578,7 @@ export function runEngineV2(input: {
     params,
     kpis: {
       lines: lines.length,
-      skuCount,
+      skuCount: new Set(lines.map((x) => `${x.sku}||${x.warehouse}`)).size,
       warehouseCount: warehouses.length,
       totalOnHand,
       out7,
