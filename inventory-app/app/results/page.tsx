@@ -17,7 +17,13 @@ import { runEngineV2, getDefaultEngineParams, type LineOut } from "@/lib/engineV
    Types (UI)
 ========================================================= */
 
-type Decision = "ORDER_NOW" | "WATCH" | "REDUCE" | "DEAD" | "HEALTHY";
+type Decision =
+  | "TRANSFER_FIRST"
+  | "ORDER_NOW"
+  | "WATCH"
+  | "REDUCE"
+  | "DEAD"
+  | "HEALTHY";
 
 type Thresholds = {
   leadTimeDays: number; // user-defined
@@ -28,6 +34,8 @@ type Thresholds = {
 type EvidenceTone = "cyan" | "amber" | "green" | "red" | "violet" | "steel";
 
 type EvidenceChip = { k: string; v: string; tone?: EvidenceTone };
+
+type TransferLeg = { fromWH: string; toWH: string; qty: number };
 
 type RowOut = {
   sku: string;
@@ -44,6 +52,14 @@ type RowOut = {
   reorderPoint: number;
   targetStock: number;
   suggestedOrder: number;
+
+  // Transfer suggestions
+  transferIn: TransferLeg[]; // legs into this WH (as receiver)
+  transferOut: TransferLeg[]; // legs out of this WH (as donor)
+  transferInQty: number;
+  transferOutQty: number;
+  purchaseAfterTransfers: number; // max(0, suggestedOrder - transferInQty)
+  coverageByTransfer: number; // transferInQty / suggestedOrder (0..1)
 
   decision: Decision;
   severity: number; // 0..100
@@ -76,7 +92,7 @@ function normalizeThresholds(t?: Partial<Thresholds> | null): Thresholds {
   return {
     leadTimeDays: clampInt(Number(t?.leadTimeDays ?? 7), 0, 365),
     safetyDays: clampInt(Number(t?.safetyDays ?? 7), 0, 365),
-    overstockDays: clampInt(Number(t?.overstockDays ?? 90), 1, 3650), // ✅ default 90
+    overstockDays: clampInt(Number(t?.overstockDays ?? 90), 1, 3650),
   };
 }
 
@@ -120,6 +136,8 @@ function percent(n: number): string {
 
 function decisionLabel(d: Decision): string {
   switch (d) {
+    case "TRANSFER_FIRST":
+      return "Transfer first";
     case "ORDER_NOW":
       return "Order now";
     case "WATCH":
@@ -135,6 +153,8 @@ function decisionLabel(d: Decision): string {
 
 function decisionTone(d: Decision): { bg: string; border: string; color: string } {
   switch (d) {
+    case "TRANSFER_FIRST":
+      return { bg: "rgba(110,231,255,0.10)", border: "rgba(110,231,255,0.28)", color: "#d8f7ff" };
     case "ORDER_NOW":
       return { bg: "rgba(255,80,80,0.10)", border: "rgba(255,80,80,0.35)", color: "#ffd4d4" };
     case "WATCH":
@@ -158,16 +178,29 @@ function chipTone(t?: EvidenceTone): { bg: string; border: string; color: string
   return { bg: "rgba(160,174,192,0.10)", border: "rgba(160,174,192,0.22)", color: "#d7dce6" };
 }
 
+function cap(n: number, a: number, b: number) {
+  return Math.min(b, Math.max(a, n));
+}
+
 /* =========================================================
-   Decision logic (stronger + manufacturing-aware)
-   - Uses engine signals (profile/trend/volatility/active days/loss)
+   Decision logic (strong + manufacturing-aware)
 ========================================================= */
 
-function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "sku" | "warehouse" | "lastMoveISO"> {
-  // Choose avg demand:
-  // - STABLE: calendar avg is fine
-  // - INTERMITTENT/LUMPY: active-day avg reflects real issue days better
-  // - DECLINING/NEW: stay conservative but don’t explode
+function computeDecisionFromLine(
+  line: LineOut,
+  th: Thresholds
+): Omit<
+  RowOut,
+  | "sku"
+  | "warehouse"
+  | "lastMoveISO"
+  | "transferIn"
+  | "transferOut"
+  | "transferInQty"
+  | "transferOutQty"
+  | "purchaseAfterTransfers"
+  | "coverageByTransfer"
+> {
   const profile = line.profile;
 
   const avgCalendar = line.avgDailyOutCalendar30;
@@ -175,68 +208,53 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
 
   const chosenAvg =
     profile === "INTERMITTENT" || profile === "LUMPY"
-      ? Math.max(avgCalendar, avgActive) // don’t understate
+      ? Math.max(avgCalendar, avgActive)
       : avgCalendar;
 
-  // Volatility buffer (simple but real):
-  // cv30 ~ 0.0 stable, >1 very volatile
   const cv = line.cv30;
+
   const volFactor =
-    profile === "LUMPY" ? 1.35 : profile === "INTERMITTENT" ? 1.2 : profile === "DECLINING" ? 0.95 : 1.0;
+    profile === "LUMPY"
+      ? 1.35
+      : profile === "INTERMITTENT"
+        ? 1.2
+        : profile === "DECLINING"
+          ? 0.95
+          : 1.0;
 
-  const variabilityBump = 1 + Math.min(0.75, Math.max(0, cv)) * 0.35; // small controlled bump
+  const variabilityBump = 1 + Math.min(0.75, Math.max(0, cv)) * 0.35;
 
-  // Trend bump:
-  // trend is [-1..+1] where + means growing demand.
-  // If rising, raise buffers; if declining, reduce slightly.
   const trend = line.trend30vsPrev30;
-  const trendFactor = trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
+  const trendFactor =
+    trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
 
   const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
 
-  // Reorder Point = avg * horizon * (volFactor * variabilityBump * trendFactor)
   const reorderPoint = chosenAvg * reviewHorizon * volFactor * variabilityBump * trendFactor;
-
-  // Target Stock: slightly above ROP (ops-friendly)
   const targetStock = reorderPoint * 1.15;
 
   const onHand = line.onHand;
 
   const suggestedOrder = Math.max(0, Math.ceil(targetStock - onHand));
 
-  const daysCover =
-    chosenAvg > 0 ? onHand / chosenAvg : onHand > 0 ? 9999 : 0;
+  const daysCover = chosenAvg > 0 ? onHand / chosenAvg : onHand > 0 ? 9999 : 0;
 
   const overstockDays = Math.max(1, th.overstockDays);
 
-  // Manufacturing “loss” signal
   const loss30 = line.loss30;
-  const lossRate30 = (line.out30 + loss30) > 0 ? loss30 / (line.out30 + loss30) : 0;
+  const lossRate30 = line.out30 + loss30 > 0 ? loss30 / (line.out30 + loss30) : 0;
 
-  // Decision rules (priority):
-  // 1) ORDER_NOW: below ROP with demand, OR negative onHand
-  // 2) WATCH: near ROP band
-  // 3) REDUCE: too much cover vs policy (or dead stock)
-  // 4) DEAD: no demand but stock exists
-  // 5) HEALTHY
   let decision: Decision = "HEALTHY";
 
   const hasDemand = line.out30 > 0 || chosenAvg > 0;
 
   if (onHand < 0) decision = "ORDER_NOW";
-
   if (hasDemand && onHand <= reorderPoint) decision = "ORDER_NOW";
-
   if (hasDemand && onHand > reorderPoint && onHand <= reorderPoint * 1.25) decision = "WATCH";
-
-  // dead stock / no demand
   if (!hasDemand && onHand > 0) decision = "DEAD";
-
-  // reduce when overstock cover too high (even if demand exists)
   if (chosenAvg > 0 && daysCover >= overstockDays) decision = "REDUCE";
   if (!hasDemand && onHand > 0 && daysCover >= overstockDays) decision = "REDUCE";
 
-  // Severity
   let severity = 18;
 
   if (decision === "ORDER_NOW") {
@@ -254,10 +272,13 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
     severity = 18;
   }
 
-  // Evidence chips
   const evidence: EvidenceChip[] = [];
 
-  evidence.push({ k: "Profile", v: profile, tone: profile === "LUMPY" ? "amber" : profile === "DECLINING" ? "steel" : "green" });
+  evidence.push({
+    k: "Profile",
+    v: profile,
+    tone: profile === "LUMPY" ? "amber" : profile === "DECLINING" ? "steel" : "green",
+  });
 
   evidence.push({ k: "On hand", v: `${formatNum(onHand)}`, tone: onHand <= 0 ? "red" : "cyan" });
 
@@ -267,7 +288,7 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
   evidence.push({
     k: "Avg/day",
     v: `${formatNum(chosenAvg)}`,
-    tone: (profile === "INTERMITTENT" || profile === "LUMPY") ? "amber" : "steel",
+    tone: profile === "INTERMITTENT" || profile === "LUMPY" ? "amber" : "steel",
   });
 
   evidence.push({
@@ -304,7 +325,6 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
     evidence.push({ k: "Loss(30d)", v: `${formatNum(loss30)} (${percent(lossRate30)})`, tone: "amber" });
   }
 
-  // Suggested order shown separately, but still add a chip when urgent
   if (decision === "ORDER_NOW" && suggestedOrder > 0) {
     evidence.push({ k: "Order", v: `${formatNum(suggestedOrder)} units`, tone: "red" });
   }
@@ -336,6 +356,152 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
 }
 
 /* =========================================================
+   Transfer Engine (UI-layer)
+   - Works per SKU across warehouses
+   - Safe: disabled when warehouse mapping missing (only "ALL")
+========================================================= */
+
+function computeTransferPlan(rows: RowOut[], th: Thresholds): RowOut[] {
+  const bySku = new Map<string, RowOut[]>();
+  for (const r of rows) {
+    if (!bySku.has(r.sku)) bySku.set(r.sku, []);
+    bySku.get(r.sku)!.push(r);
+  }
+
+  const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
+
+  // helper: how much donor must keep (not a toy: considers CV + trend + lumpy/intermittent)
+  const donorKeepQty = (d: RowOut) => {
+    const base = d.avgDailyOut * reviewHorizon;
+
+    const cvBump = 1 + cap(d.cv30, 0, 1.5) * 0.18; // up to +27%
+    const trendBump = d.trend > 0 ? 1 + cap(d.trend, 0, 0.7) * 0.15 : 1; // rising demand => keep more
+    const profileBump = d.profile === "LUMPY" ? 1.12 : d.profile === "INTERMITTENT" ? 1.07 : 1.0;
+
+    // also: if losses are high, keep a touch extra
+    const lossBump = d.lossRate30 >= 0.08 ? 1.06 : 1.0;
+
+    return base * cvBump * trendBump * profileBump * lossBump;
+  };
+
+  const next: RowOut[] = rows.map((r) => ({
+    ...r,
+    transferIn: [],
+    transferOut: [],
+    transferInQty: 0,
+    transferOutQty: 0,
+    purchaseAfterTransfers: r.suggestedOrder,
+    coverageByTransfer: 0,
+  }));
+
+  const idx = new Map<string, RowOut>();
+  for (const r of next) idx.set(`${r.sku}||${r.warehouse}`, r);
+
+  for (const [sku, group] of bySku.entries()) {
+    // if only ALL, no transfers possible
+    const distinctWH = new Set(group.map((g) => g.warehouse));
+    if (distinctWH.size <= 1) continue;
+
+    // receivers: urgent-ish & need > 0
+    const receivers = group
+      .filter((r) => (r.decision === "ORDER_NOW" || r.decision === "WATCH") && r.suggestedOrder > 0)
+      .sort((a, b) => b.severity - a.severity);
+
+    if (!receivers.length) continue;
+
+    // donors: REDUCE with meaningful available
+    const donors = group
+      .filter((r) => r.decision === "REDUCE" && r.onHand > 0)
+      .map((d) => {
+        const keep = donorKeepQty(d);
+        const available = Math.max(0, d.onHand - keep);
+        return { d, keep, available };
+      })
+      .filter((x) => x.available >= 1)
+      .sort((a, b) => b.available - a.available);
+
+    if (!donors.length) continue;
+
+    for (const rec of receivers) {
+      let need = rec.suggestedOrder;
+      if (need <= 0) continue;
+
+      for (const don of donors) {
+        if (need <= 0) break;
+        if (don.available <= 0) continue;
+        if (don.d.warehouse === rec.warehouse) continue;
+
+        const take = Math.min(need, Math.floor(don.available));
+        if (take <= 0) continue;
+
+        don.available -= take;
+        need -= take;
+
+        const toRow = idx.get(`${sku}||${rec.warehouse}`);
+        const fromRow = idx.get(`${sku}||${don.d.warehouse}`);
+        if (!toRow || !fromRow) continue;
+
+        const leg: TransferLeg = { fromWH: don.d.warehouse, toWH: rec.warehouse, qty: take };
+        toRow.transferIn.push(leg);
+        fromRow.transferOut.push(leg);
+
+        toRow.transferInQty += take;
+        fromRow.transferOutQty += take;
+      }
+
+      const toRow = idx.get(`${sku}||${rec.warehouse}`);
+      if (!toRow) continue;
+
+      toRow.purchaseAfterTransfers = Math.max(0, toRow.suggestedOrder - toRow.transferInQty);
+      toRow.coverageByTransfer =
+        toRow.suggestedOrder > 0 ? cap(toRow.transferInQty / toRow.suggestedOrder, 0, 1) : 0;
+    }
+  }
+
+  // enrich evidence + decision override (TRANSFER_FIRST)
+  for (const r of next) {
+    if (r.transferInQty > 0) {
+      const legsText = r.transferIn
+        .slice(0, 2)
+        .map((x) => `${formatNum(x.qty)} from ${x.fromWH}`)
+        .join(" • ");
+
+      const tone: EvidenceTone =
+        r.coverageByTransfer >= 0.6 ? "cyan" : r.coverageByTransfer >= 0.25 ? "amber" : "steel";
+
+      r.evidence = [
+        { k: "Transfer", v: `${formatNum(r.transferInQty)} (${percent(r.coverageByTransfer)})`, tone },
+        { k: "From", v: legsText || "—", tone: "steel" },
+        { k: "Buy after", v: `${formatNum(r.purchaseAfterTransfers)}`, tone: r.purchaseAfterTransfers > 0 ? "amber" : "green" },
+        ...r.evidence,
+      ];
+
+      // Decision override: if transfer covers most of need, force "TRANSFER_FIRST"
+      if ((r.decision === "ORDER_NOW" || r.decision === "WATCH") && r.coverageByTransfer >= 0.6) {
+        r.decision = "TRANSFER_FIRST";
+        // severity nudged but still urgent-ish
+        r.severity = clampInt(Math.max(r.severity, 70), 50, 95);
+      }
+    }
+
+    if (r.transferOutQty > 0) {
+      const legsText = r.transferOut
+        .slice(0, 2)
+        .map((x) => `${formatNum(x.qty)} to ${x.toWH}`)
+        .join(" • ");
+
+      r.evidence = [
+        { k: "Can transfer", v: `${formatNum(r.transferOutQty)}`, tone: "violet" },
+        { k: "To", v: legsText || "—", tone: "steel" },
+        ...r.evidence,
+      ];
+    }
+  }
+
+  return next;
+}
+
+/* =========================================================
    Page
 ========================================================= */
 
@@ -344,10 +510,8 @@ export default function ResultsPage() {
 
   const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
   const mappingV2: MovementsMapping | null = typeof window !== "undefined" ? loadMappingV2() : null;
-  const mvTypeValues =
-    typeof window !== "undefined" ? loadMovementTypeValueMappingV2WithDefault() : null;
+  const mvTypeValues = typeof window !== "undefined" ? loadMovementTypeValueMappingV2WithDefault() : null;
 
-  // thresholds
   const initialT = typeof window !== "undefined" ? loadThresholdsLocal() : normalizeThresholds();
   const [leadTimeDays, setLeadTimeDays] = useState<number>(initialT.leadTimeDays);
   const [safetyDays, setSafetyDays] = useState<number>(initialT.safetyDays);
@@ -359,7 +523,6 @@ export default function ResultsPage() {
   const [decisionFilter, setDecisionFilter] = useState<Decision | "ALL">("ALL");
   const [search, setSearch] = useState<string>("");
 
-  // persist thresholds
   useEffect(() => {
     const t = normalizeThresholds({ leadTimeDays, safetyDays, overstockDays });
     saveThresholdsLocal(t);
@@ -367,7 +530,6 @@ export default function ResultsPage() {
   }, [leadTimeDays, safetyDays, overstockDays]);
 
   useEffect(() => {
-    // keep preset label “honest”
     const t = normalizeThresholds({ leadTimeDays, safetyDays, overstockDays });
     const isCons = t.leadTimeDays === 14 && t.safetyDays === 14 && t.overstockDays === 60;
     const isBal = t.leadTimeDays === 7 && t.safetyDays === 7 && t.overstockDays === 90;
@@ -399,7 +561,7 @@ export default function ResultsPage() {
 
     return {
       wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
-      container: { maxWidth: 1150, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
+      container: { maxWidth: 1180, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
 
       hero: { ...card, padding: 18, marginBottom: 16 } as CSSProperties,
       card,
@@ -458,6 +620,19 @@ export default function ResultsPage() {
         background: "rgba(80,255,170,0.08)",
       } as CSSProperties,
 
+      badgeWarn: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 900,
+        color: "#ffe9b3",
+        border: "1px solid rgba(255,196,0,0.25)",
+        background: "rgba(255,196,0,0.08)",
+      } as CSSProperties,
+
       badgeBad: {
         display: "inline-flex",
         alignItems: "center",
@@ -509,7 +684,7 @@ export default function ResultsPage() {
 
       small: { fontSize: 12, color: "#8f97ad", lineHeight: 1.5 } as CSSProperties,
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
       kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
       kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
       kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as CSSProperties,
@@ -517,9 +692,7 @@ export default function ResultsPage() {
   }, []);
 
   const hasMovements = !!movements?.rows?.length;
-  const hasMapping =
-    !!mappingV2?.itemId && !!mappingV2?.date && !!mappingV2?.qty && !!mappingV2?.movementType;
-
+  const hasMapping = !!mappingV2?.itemId && !!mappingV2?.date && !!mappingV2?.qty && !!mappingV2?.movementType;
   const showMissing = !hasMovements || !hasMapping || !mvTypeValues;
 
   const statusText = useMemo(() => {
@@ -535,12 +708,13 @@ export default function ResultsPage() {
     [leadTimeDays, safetyDays, overstockDays]
   );
 
-  const { rowsOut, warehouses, kpis, warnings } = useMemo(() => {
+  const { rowsOut, warehouses, kpis, warnings, transfersEnabled } = useMemo(() => {
     const empty = {
       rowsOut: [] as RowOut[],
       warehouses: ["ALL"] as string[],
       warnings: [] as string[],
-      kpis: { skuCount: 0, orderNow: 0, watch: 0, reduce: 0 },
+      transfersEnabled: false,
+      kpis: { skuCount: 0, transferFirst: 0, orderNow: 0, watch: 0, reduce: 0, buyAfter: 0 },
     };
 
     if (!movements || !mappingV2 || !mvTypeValues) return empty;
@@ -551,9 +725,7 @@ export default function ResultsPage() {
       mvTypes: mvTypeValues,
       params: {
         ...getDefaultEngineParams(),
-        // manufacturing-friendly defaults:
         w90: 90,
-        // loss tokens can be expanded later in PRO via UI:
         lossTokens: ["scrap", "waste", "reject", "quality", "damage", "loss"],
       },
     });
@@ -565,25 +737,39 @@ export default function ResultsPage() {
       };
     }
 
-    const out: RowOut[] = engine.lines.map((ln: LineOut) => {
+    // base rows
+    const base: RowOut[] = engine.lines.map((ln: LineOut) => {
       const core = computeDecisionFromLine(ln, th);
-
-      // Build final row
       return {
         sku: ln.sku,
         warehouse: ln.warehouse,
+
         onHand: core.onHand,
+
         out30d: core.out30d,
         out90d: core.out90d,
+
         avgDailyOut: core.avgDailyOut,
         daysCover: core.daysCover,
+
         reorderPoint: core.reorderPoint,
         targetStock: core.targetStock,
         suggestedOrder: core.suggestedOrder,
+
+        transferIn: [],
+        transferOut: [],
+        transferInQty: 0,
+        transferOutQty: 0,
+        purchaseAfterTransfers: core.suggestedOrder,
+        coverageByTransfer: 0,
+
         decision: core.decision,
         severity: core.severity,
+
         lastMoveISO: ln.lastMoveISO,
+
         evidence: core.evidence,
+
         profile: core.profile,
         trend: core.trend,
         cv30: core.cv30,
@@ -593,29 +779,54 @@ export default function ResultsPage() {
       };
     });
 
+    // Transfers enabled only when we have >1 real warehouse across dataset
+    const whList = ["ALL", ...engine.warehouses.filter((w) => w !== "ALL")];
+    const enabled = whList.length > 2; // ALL + at least 2 real WHs
+
+    const planned = enabled ? computeTransferPlan(base, th) : base;
+
     // sort: most urgent first
-    out.sort((a, b) => {
+    planned.sort((a, b) => {
       const dRank = (x: Decision) =>
-        x === "ORDER_NOW" ? 1 : x === "WATCH" ? 2 : x === "REDUCE" ? 3 : x === "DEAD" ? 4 : 5;
+        x === "TRANSFER_FIRST"
+          ? 1
+          : x === "ORDER_NOW"
+            ? 2
+            : x === "WATCH"
+              ? 3
+              : x === "REDUCE"
+                ? 4
+                : x === "DEAD"
+                  ? 5
+                  : 6;
+
       const ra = dRank(a.decision);
       const rb = dRank(b.decision);
       if (ra !== rb) return ra - rb;
       return b.severity - a.severity;
     });
 
-    const whList = ["ALL", ...engine.warehouses.filter((w) => w !== "ALL")];
+    const skuCount = new Set(planned.map((r) => `${r.sku}||${r.warehouse}`)).size;
 
     const k = {
-      skuCount: new Set(out.map((r) => `${r.sku}||${r.warehouse}`)).size,
-      orderNow: out.filter((r) => r.decision === "ORDER_NOW").length,
-      watch: out.filter((r) => r.decision === "WATCH").length,
-      reduce: out.filter((r) => r.decision === "REDUCE").length,
+      skuCount,
+      transferFirst: planned.filter((r) => r.decision === "TRANSFER_FIRST").length,
+      orderNow: planned.filter((r) => r.decision === "ORDER_NOW").length,
+      watch: planned.filter((r) => r.decision === "WATCH").length,
+      reduce: planned.filter((r) => r.decision === "REDUCE").length,
+      buyAfter: planned.reduce((s, r) => s + (r.purchaseAfterTransfers ?? 0), 0),
     };
 
+    const extraWarnings = [...engine.warnings];
+    if (!enabled) {
+      extraWarnings.push("Transfers disabled (warehouse not mapped or only one warehouse found).");
+    }
+
     return {
-      rowsOut: out,
+      rowsOut: planned,
       warehouses: whList,
-      warnings: engine.warnings,
+      warnings: extraWarnings,
+      transfersEnabled: enabled,
       kpis: k,
     };
   }, [movements, mappingV2, mvTypeValues, th]);
@@ -627,9 +838,8 @@ export default function ResultsPage() {
     if (decisionFilter !== "ALL") x = x.filter((r) => r.decision === decisionFilter);
 
     const q = search.trim().toLowerCase();
-    if (q) {
-      x = x.filter((r) => r.sku.toLowerCase().includes(q) || r.warehouse.toLowerCase().includes(q));
-    }
+    if (q) x = x.filter((r) => r.sku.toLowerCase().includes(q) || r.warehouse.toLowerCase().includes(q));
+
     return x;
   }, [rowsOut, warehouseFilter, decisionFilter, search]);
 
@@ -641,7 +851,7 @@ export default function ResultsPage() {
     } else if (p === "BALANCED") {
       setLeadTimeDays(7);
       setSafetyDays(7);
-      setOverstockDays(90); // ✅ default + recommended for evaluation horizon
+      setOverstockDays(90);
     } else {
       setLeadTimeDays(3);
       setSafetyDays(3);
@@ -681,16 +891,14 @@ export default function ResultsPage() {
             <span style={styles.pill}>⚡ Results</span>
             <h1 style={styles.h1}>Ops-ready decisions with evidence</h1>
             <p style={styles.p}>
-              This page reads <b style={{ color: "#e6e8ee" }}>V2 Movements</b> + your{" "}
-              <b style={{ color: "#e6e8ee" }}>Mapping</b> +{" "}
-              <b style={{ color: "#e6e8ee" }}>Movement Type Values</b>. Engine adds demand profiles, trend, volatility, and loss signals.
+              Reads <b style={{ color: "#e6e8ee" }}>Movements</b> + your <b style={{ color: "#e6e8ee" }}>Mapping</b> +{" "}
+              <b style={{ color: "#e6e8ee" }}>Movement Type Values</b>. Adds profile, trend, volatility, losses — and{" "}
+              <b style={{ color: "#e6e8ee" }}>Transfer-first</b> suggestions when warehouses exist.
             </p>
 
             {showMissing ? (
               <div style={{ marginTop: 12 }}>
-                <div style={{ ...styles.p, marginTop: 6 }}>
-                  Missing demo data. Start from Upload → Mapping → Movement Types.
-                </div>
+                <div style={{ ...styles.p, marginTop: 6 }}>Missing demo data. Start from Upload → Mapping → Movement Types.</div>
 
                 <div style={styles.row}>
                   <span style={styles.badgeBad}>Status: {statusText}</span>
@@ -705,11 +913,14 @@ export default function ResultsPage() {
                 <div style={styles.statusRow}>
                   <span style={styles.badgeOk}>Status: {statusText}</span>
                   {warnings?.length ? (
-                    <span style={{ ...styles.small, color: "#ffe9b3" }}>
-                      ⚠ {warnings.slice(0, 2).join(" • ")}
-                    </span>
+                    <span style={{ ...styles.small, color: "#ffe9b3" }}>⚠ {warnings.slice(0, 2).join(" • ")}</span>
                   ) : (
                     <span style={styles.small}>Engine OK • Smart signals enabled</span>
+                  )}
+                  {!transfersEnabled ? (
+                    <span style={styles.badgeWarn}>Transfers: disabled</span>
+                  ) : (
+                    <span style={styles.badgeOk}>Transfers: enabled</span>
                   )}
                 </div>
 
@@ -720,6 +931,10 @@ export default function ResultsPage() {
                     <div style={styles.kpiValue}>{kpis.skuCount}</div>
                   </div>
                   <div style={styles.kpi}>
+                    <div style={styles.kpiTitle}>Transfer first</div>
+                    <div style={styles.kpiValue}>{kpis.transferFirst}</div>
+                  </div>
+                  <div style={styles.kpi}>
                     <div style={styles.kpiTitle}>Order now</div>
                     <div style={styles.kpiValue}>{kpis.orderNow}</div>
                   </div>
@@ -728,8 +943,8 @@ export default function ResultsPage() {
                     <div style={styles.kpiValue}>{kpis.watch}</div>
                   </div>
                   <div style={styles.kpi}>
-                    <div style={styles.kpiTitle}>Reduce</div>
-                    <div style={styles.kpiValue}>{kpis.reduce}</div>
+                    <div style={styles.kpiTitle}>Buy after transfers</div>
+                    <div style={styles.kpiValue}>{formatNum(kpis.buyAfter)}</div>
                   </div>
                 </div>
 
@@ -737,9 +952,7 @@ export default function ResultsPage() {
                 <div style={styles.grid2}>
                   <div style={styles.cardPad}>
                     <div style={{ fontWeight: 950, fontSize: 16 }}>Policy thresholds</div>
-                    <div style={{ ...styles.small, marginTop: 6 }}>
-                      You control these — no random assumptions. (Overstock horizon default = <b>90</b>)
-                    </div>
+                    <div style={{ ...styles.small, marginTop: 6 }}>You control these — no random assumptions.</div>
 
                     <div style={styles.row}>
                       <button
@@ -815,35 +1028,26 @@ export default function ResultsPage() {
 
                   <div style={styles.cardPad}>
                     <div style={{ fontWeight: 950, fontSize: 16 }}>Filters</div>
-                    <div style={{ ...styles.small, marginTop: 6 }}>
-                      Narrow down to a warehouse / decision / SKU search.
-                    </div>
+                    <div style={{ ...styles.small, marginTop: 6 }}>Narrow down to a warehouse / decision / SKU search.</div>
 
                     <div style={styles.controlGrid}>
                       <div style={styles.field}>
                         <div style={styles.label}>Warehouse</div>
-                        <select
-                          style={styles.input}
-                          value={warehouseFilter}
-                          onChange={(e) => setWarehouseFilter(e.target.value)}
-                        >
+                        <select style={styles.input} value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value)}>
                           {warehouses.map((w) => (
                             <option key={w} value={w}>
                               {w}
                             </option>
                           ))}
                         </select>
-                        <div style={styles.small}>If your file has warehouse mapped.</div>
+                        <div style={styles.small}>Transfers need warehouses.</div>
                       </div>
 
                       <div style={styles.field}>
                         <div style={styles.label}>Decision</div>
-                        <select
-                          style={styles.input}
-                          value={decisionFilter}
-                          onChange={(e) => setDecisionFilter(e.target.value as any)}
-                        >
+                        <select style={styles.input} value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as any)}>
                           <option value="ALL">ALL</option>
+                          <option value="TRANSFER_FIRST">TRANSFER_FIRST</option>
                           <option value="ORDER_NOW">ORDER_NOW</option>
                           <option value="WATCH">WATCH</option>
                           <option value="REDUCE">REDUCE</option>
@@ -883,7 +1087,8 @@ export default function ResultsPage() {
                         <th style={styles.th}>Out(30d)</th>
                         <th style={styles.th}>Cover</th>
                         <th style={styles.th}>ROP</th>
-                        <th style={styles.th}>Suggested order</th>
+                        <th style={styles.th}>Suggested</th>
+                        <th style={styles.th}>Buy after</th>
                         <th style={styles.th}>Evidence</th>
                       </tr>
                     </thead>
@@ -907,9 +1112,7 @@ export default function ResultsPage() {
 
                             <td style={styles.td}>
                               <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{r.sku}</div>
-                              <div style={styles.small}>
-                                {r.lastMoveISO ? `Last move: ${r.lastMoveISO}` : "Last move: —"}
-                              </div>
+                              <div style={styles.small}>{r.lastMoveISO ? `Last move: ${r.lastMoveISO}` : "Last move: —"}</div>
                             </td>
 
                             <td style={styles.td}>
@@ -929,8 +1132,15 @@ export default function ResultsPage() {
                             </td>
 
                             <td style={styles.td}>
+                              <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{formatNum(r.purchaseAfterTransfers)}</div>
+                              <div style={styles.small}>
+                                {r.transferInQty > 0 ? `Covered: ${percent(r.coverageByTransfer)}` : "Covered: 0%"}
+                              </div>
+                            </td>
+
+                            <td style={styles.td}>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                                {r.evidence.slice(0, 7).map((c, i) => {
+                                {r.evidence.slice(0, 8).map((c, i) => {
                                   const ct = chipTone(c.tone);
                                   return (
                                     <span
@@ -955,7 +1165,7 @@ export default function ResultsPage() {
                   </table>
 
                   <div style={{ ...styles.small, marginTop: 10 }}>
-                    Note: Showing max 250 rows for speed. Sorting priority: Order Now → Watch → Reduce → Dead → Healthy.
+                    Note: Showing max 250 rows for speed. Sorting: Transfer First → Order Now → Watch → Reduce → Dead → Healthy.
                   </div>
                 </div>
               </div>
