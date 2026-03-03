@@ -69,7 +69,6 @@ function writePayloadV1(payload: DemoPayloadV1) {
    Public API (V1)
 ---------------------------------- */
 
-/** Save uploaded CSV into session (headers + rows). */
 export function saveUpload(
   headers: string[],
   rows: DemoRow[],
@@ -87,7 +86,6 @@ export function saveUpload(
   writePayloadV1(payload);
 }
 
-/** Load upload data (headers + rows). */
 export function loadUpload(): {
   headers: string[];
   rows: DemoRow[];
@@ -98,24 +96,19 @@ export function loadUpload(): {
   return { headers: p.headers, rows: p.rows, meta: p.meta };
 }
 
-/** Save the user's column mapping. */
 export function saveMapping(mapping: Mapping) {
   const p = readPayloadV1();
   if (!p) return;
   writePayloadV1({ ...p, mapping });
 }
 
-/** Load the saved mapping. */
 export function loadMapping(): Mapping | null {
   const p = readPayloadV1();
   return p?.mapping ?? null;
 }
 
-/** Save thresholds for calculations (client-only). */
 export function saveThresholds(t: Thresholds) {
   const p = readPayloadV1();
-
-  // If no upload yet, still allow thresholds to exist
   const base: DemoPayloadV1 =
     p ??
     ({
@@ -127,13 +120,11 @@ export function saveThresholds(t: Thresholds) {
   writePayloadV1({ ...base, thresholds: normalizeThresholds(t) });
 }
 
-/** Load thresholds with defaults. */
 export function loadThresholds(): Thresholds {
   const p = readPayloadV1();
   return normalizeThresholds(p?.thresholds);
 }
 
-/** Clear V1 only (legacy demo reset). */
 export function clearDemo() {
   if (!isBrowser()) return;
   sessionStorage.removeItem(STORAGE_KEY_V1);
@@ -147,7 +138,6 @@ function normalizeThresholds(t?: Partial<Thresholds> | null): Thresholds {
   const leadTimeDays = clampInt(Number(t?.leadTimeDays ?? 7), 0, 365);
   const safetyDays = clampInt(Number(t?.safetyDays ?? 7), 0, 365);
   const overstockDays = clampInt(Number(t?.overstockDays ?? 90), 1, 3650);
-
   return { leadTimeDays, safetyDays, overstockDays };
 }
 
@@ -161,7 +151,6 @@ function clampInt(n: number, min: number, max: number): number {
 ========================================================= */
 
 function stripBOM(s: string): string {
-  // UTF-8 BOM
   if (s && s.charCodeAt(0) === 0xfeff) return s.slice(1);
   return s;
 }
@@ -205,7 +194,6 @@ function parseLineWithDelimiter(line: string, delimiter: string): string[] {
 
     if (ch === '"') {
       const next = line[i + 1];
-      // Escaped quote inside quoted string => ""
       if (inQuotes && next === '"') {
         cur += '"';
         i++;
@@ -228,31 +216,14 @@ function parseLineWithDelimiter(line: string, delimiter: string): string[] {
   return out;
 }
 
-/**
- * Clean cell content:
- * - trims
- * - removes wrapping quotes ONLY if the whole cell is wrapped
- */
 function cleanCell(x: string): string {
   const s = (x ?? "").toString().trim();
-
   if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
     return s.slice(1, -1).trim();
   }
-
   return s;
 }
 
-/**
- * Parse CSV text into headers + rows.
- * Improvements:
- * - Detect delimiter (, ; \t |)
- * - Strip BOM
- * - Unique headers to avoid overwriting
- * - Handles quotes + delimiters inside quotes
- *
- * Note: does NOT support multiline quoted fields (demo-friendly).
- */
 export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
   const normalized = stripBOM(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalized.split("\n").filter((l) => l.trim().length > 0);
@@ -282,18 +253,10 @@ export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
   return { headers, rows };
 }
 
-/**
- * Convert string to number safely.
- * Supports:
- * - "1,234" and "1 234"
- * - "(123)" => -123 (accounting negative)
- * - empty => 0
- */
 export function toNumber(x: string): number {
   const raw = (x ?? "").toString().trim();
   if (!raw) return 0;
 
-  // (123) => -123
   const isAccountingNeg = /^\(.*\)$/.test(raw);
   const unwrapped = isAccountingNeg ? raw.slice(1, -1) : raw;
 
@@ -316,6 +279,12 @@ export type Dataset = {
   fileName?: string;
 };
 
+/**
+ * ✅ V2 Movements mapping
+ * Added optional columns to support Results upgrades:
+ * - unitCost: for cash impact & loss cost (optional)
+ * - docId: for explainability (optional)
+ */
 export type MovementsMapping = {
   itemId: string;
   date: string;
@@ -323,22 +292,44 @@ export type MovementsMapping = {
   movementType: string;
   warehouse?: string;
   uom?: string;
+
+  unitCost?: string; // NEW optional
+  docId?: string; // NEW optional (doc number / reference)
 };
 
 /**
- * PRO: Movement type VALUE mapping across ERPs.
- * Backward compatible with old {inValues,outValues,otherValues}.
+ * ✅ Movement type VALUE mapping across ERPs.
+ * IMPORTANT: keep backward compatible with BOTH:
+ * - old keys: scrapLossValues
+ * - UI keys: lossValues
  */
 export type MovementTypeValueMapping = {
   inValues: string[];
   outValues: string[];
 
-  // Pro buckets (optional in old saved data)
   transferValues?: string[];
   adjustValues?: string[];
-  scrapLossValues?: string[];
+
+  // aliases:
+  scrapLossValues?: string[]; // older name
+  lossValues?: string[]; // newer UI-friendly name
 
   otherValues: string[];
+};
+
+/**
+ * ✅ NEW: V2 Engine/User settings (for Results upgrades)
+ * - demandWindowDays: 30/60/90
+ * - trendWindowDays: 30 by default
+ * - deadDays: for DEAD decision definition
+ * - enableTransfers: allow transfer suggestions if warehouse mapped
+ */
+export type EngineSettingsV2 = {
+  demandWindowDays: 30 | 60 | 90;
+  trendWindowDays: 30 | 60 | 90;
+  deadDays: number; // default 180
+  enableTransfers: boolean; // default true
+  maxRowsRender: number; // default 250
 };
 
 export type DemoStateV2 = {
@@ -348,6 +339,7 @@ export type DemoStateV2 = {
   mappingV2?: {
     movements?: MovementsMapping;
     movementTypeValues?: MovementTypeValueMapping;
+    engineSettings?: EngineSettingsV2;
   };
 };
 
@@ -370,31 +362,26 @@ function writeStateV2(state: DemoStateV2) {
   sessionStorage.setItem(STORAGE_KEY_V2, JSON.stringify(state));
 }
 
-/** Clear V2 only. */
 export function clearDemoV2() {
   if (!isBrowser()) return;
   sessionStorage.removeItem(STORAGE_KEY_V2);
 }
 
-/** Clear EVERYTHING (V1 + V2) to prevent mixed demos. */
 export function clearAllDemo() {
   clearDemo();
   clearDemoV2();
 }
 
-/** Load all datasets (V2). */
 export function loadDatasetsV2(): DemoStateV2["datasets"] {
   const s = readStateV2();
   return s?.datasets ?? {};
 }
 
-/** Load one dataset (V2). */
 export function loadDatasetV2(key: DatasetKey): Dataset | null {
   const s = readStateV2();
   return s?.datasets?.[key] ?? null;
 }
 
-/** Save one dataset (V2). */
 export function saveDatasetV2(
   key: DatasetKey,
   headers: string[],
@@ -417,7 +404,6 @@ export function saveDatasetV2(
   writeStateV2(s);
 }
 
-/** Remove one dataset (V2). */
 export function clearDatasetV2(key: DatasetKey) {
   const s = readStateV2();
   if (!s?.datasets) return;
@@ -445,6 +431,52 @@ export function saveMappingV2(mapping: MovementsMapping) {
 export function loadMappingV2(): MovementsMapping | null {
   const s = readStateV2();
   return s?.mappingV2?.movements ?? null;
+}
+
+/* -------------------------------
+   V2 Settings (Engine/UI) — NEW
+-------------------------------- */
+
+function normalizeEngineSettingsV2(x?: Partial<EngineSettingsV2> | null): EngineSettingsV2 {
+  const demand = (x?.demandWindowDays ?? 30) as any;
+  const trend = (x?.trendWindowDays ?? 30) as any;
+
+  const demandWindowDays: 30 | 60 | 90 = demand === 60 ? 60 : demand === 90 ? 90 : 30;
+  const trendWindowDays: 30 | 60 | 90 = trend === 60 ? 60 : trend === 90 ? 90 : 30;
+
+  const deadDays = clampInt(Number(x?.deadDays ?? 180), 30, 3650);
+  const enableTransfers = Boolean(x?.enableTransfers ?? true);
+  const maxRowsRender = clampInt(Number(x?.maxRowsRender ?? 250), 50, 5000);
+
+  return { demandWindowDays, trendWindowDays, deadDays, enableTransfers, maxRowsRender };
+}
+
+export function getDefaultEngineSettingsV2(): EngineSettingsV2 {
+  return normalizeEngineSettingsV2();
+}
+
+export function saveEngineSettingsV2(settings: EngineSettingsV2) {
+  const s: DemoStateV2 =
+    readStateV2() ?? {
+      datasets: {},
+      meta: { createdAtISO: new Date().toISOString() },
+    };
+
+  s.mappingV2 = s.mappingV2 ?? {};
+  s.mappingV2.engineSettings = normalizeEngineSettingsV2(settings);
+
+  writeStateV2(s);
+}
+
+export function loadEngineSettingsV2(): EngineSettingsV2 | null {
+  const s = readStateV2();
+  const raw = s?.mappingV2?.engineSettings;
+  if (!raw) return null;
+  return normalizeEngineSettingsV2(raw);
+}
+
+export function loadEngineSettingsV2WithDefault(): EngineSettingsV2 {
+  return loadEngineSettingsV2() ?? getDefaultEngineSettingsV2();
 }
 
 /* -------------------------------
@@ -477,16 +509,22 @@ function normalizeMovementTypeValueMapping(
 
   const transferValues = uniqueTokens((m as any)?.transferValues ?? []);
   const adjustValues = uniqueTokens((m as any)?.adjustValues ?? []);
-  const scrapLossValues = uniqueTokens((m as any)?.scrapLossValues ?? []);
+
+  // ✅ merge aliases:
+  const lossA = uniqueTokens((m as any)?.lossValues ?? []);
+  const lossB = uniqueTokens((m as any)?.scrapLossValues ?? []);
+  const lossValues = uniqueTokens([...lossA, ...lossB]);
 
   const otherValues = uniqueTokens(m?.otherValues ?? []);
 
+  // store both keys to be safe with any page
   return {
     inValues,
     outValues,
     transferValues,
     adjustValues,
-    scrapLossValues,
+    lossValues,
+    scrapLossValues: lossValues,
     otherValues,
   };
 }
@@ -580,6 +618,24 @@ export function getDefaultMovementTypeValueMapping(): MovementTypeValueMapping {
       "701",
       "702",
     ],
+    // ✅ expose both aliases
+    lossValues: [
+      "SCRAP",
+      "LOSS",
+      "DAMAGE",
+      "DAMAGED",
+      "WASTE",
+      "SHRINK",
+      "SHRINKAGE",
+      "EXPIRED",
+      "OBSOLETE",
+      "REJECT",
+      "REJECTED",
+      "QUALITY_REJECT",
+      "DISPOSAL",
+      "551",
+      "553",
+    ],
     scrapLossValues: [
       "SCRAP",
       "LOSS",
@@ -628,8 +684,6 @@ export function loadMovementTypeValueMappingV2(): MovementTypeValueMapping | nul
   const s = readStateV2();
   const raw = s?.mappingV2?.movementTypeValues as any;
   if (!raw) return null;
-
-  // Backward compatible normalize
   return normalizeMovementTypeValueMapping(raw);
 }
 
@@ -663,7 +717,7 @@ export function validateMovementTypeValueMapping(
     OUT: new Set(m.outValues.map(normToken)),
     TRANSFER: new Set((m.transferValues ?? []).map(normToken)),
     ADJUST: new Set((m.adjustValues ?? []).map(normToken)),
-    SCRAP_LOSS: new Set((m.scrapLossValues ?? []).map(normToken)),
+    LOSS: new Set((m.lossValues ?? m.scrapLossValues ?? []).map(normToken)),
     OTHER: new Set(m.otherValues.map(normToken)),
   };
 
@@ -693,7 +747,7 @@ export function validateMovementTypeValueMapping(
     m.outValues.length +
     (m.transferValues?.length ?? 0) +
     (m.adjustValues?.length ?? 0) +
-    (m.scrapLossValues?.length ?? 0) +
+    (m.lossValues?.length ?? 0) +
     m.otherValues.length;
 
   if (totalTagged < 3) {
@@ -717,6 +771,7 @@ export type MovementsValidation = {
     rowsWithMissingRequired: number;
     rowsWithBadQty: number;
     rowsWithBadDate: number;
+    rowsWithBadUnitCost: number; // NEW
   };
 };
 
@@ -724,7 +779,6 @@ function looksLikeNumber(x: string): boolean {
   const cleaned = (x ?? "").toString().trim();
   if (cleaned === "") return false;
 
-  // accept (123) too
   const isAccountingNeg = /^\(.*\)$/.test(cleaned);
   const unwrapped = isAccountingNeg ? cleaned.slice(1, -1) : cleaned;
 
@@ -759,6 +813,14 @@ export function validateMovementsDataset(
     if (!headers.includes(col)) errors.push(`Mapped column not found in CSV headers: "${col}".`);
   }
 
+  // optional cols sanity
+  const optCols = [mapping.warehouse, mapping.uom, mapping.unitCost, mapping.docId].filter(Boolean) as string[];
+  for (const col of optCols) {
+    if (col && !headers.includes(col)) {
+      warnings.push(`Optional mapped column not found (will be ignored): "${col}".`);
+    }
+  }
+
   if (errors.length) {
     return {
       ok: false,
@@ -770,6 +832,7 @@ export function validateMovementsDataset(
         rowsWithMissingRequired: 0,
         rowsWithBadQty: 0,
         rowsWithBadDate: 0,
+        rowsWithBadUnitCost: 0,
       },
     };
   }
@@ -778,6 +841,7 @@ export function validateMovementsDataset(
   let missingReq = 0;
   let badQty = 0;
   let badDate = 0;
+  let badUnitCost = 0;
 
   for (let i = 0; i < sampleSize; i++) {
     const r = rows[i];
@@ -794,6 +858,11 @@ export function validateMovementsDataset(
 
     if (!looksLikeNumber(qty)) badQty++;
     if (!looksLikeDate(dt)) badDate++;
+
+    if (mapping.unitCost && headers.includes(mapping.unitCost)) {
+      const uc = (r[mapping.unitCost] ?? "").toString().trim();
+      if (uc && !looksLikeNumber(uc)) badUnitCost++;
+    }
   }
 
   if (rows.length === 0) errors.push("Movements.csv has headers but no data rows.");
@@ -806,6 +875,7 @@ export function validateMovementsDataset(
 
   if (badQty > 0) warnings.push(`Quantity looks non-numeric in ${badQty}/${sampleSize} checked rows.`);
   if (badDate > 0) warnings.push(`Date looks unparseable in ${badDate}/${sampleSize} checked rows.`);
+  if (badUnitCost > 0) warnings.push(`Unit cost looks non-numeric in ${badUnitCost}/${sampleSize} checked rows.`);
 
   let neg = 0;
   for (let i = 0; i < sampleSize; i++) {
@@ -831,6 +901,7 @@ export function validateMovementsDataset(
       rowsWithMissingRequired: missingReq,
       rowsWithBadQty: badQty,
       rowsWithBadDate: badDate,
+      rowsWithBadUnitCost: badUnitCost,
     },
   };
 }
@@ -839,22 +910,20 @@ export function validateMovementsDataset(
    V2 Sample CSV generators
 -------------------------------- */
 
-/** Required sample ledger: each row = movement. */
 export function getSampleMovementsCSV() {
   return [
-    ["item_id", "date", "qty", "uom", "movement_type", "warehouse"].join(","),
-    ["SKU-102", "2026-02-01", "120", "piece", "RECEIPT", "WH-A"].join(","),
-    ["SKU-102", "2026-02-15", "40", "piece", "ISSUE", "WH-A"].join(","),
-    ["SKU-088", "2026-02-01", "900", "piece", "RECEIPT", "WH-A"].join(","),
-    ["SKU-088", "2026-02-20", "60", "piece", "ISSUE", "WH-A"].join(","),
-    ["SKU-055", "2026-02-05", "40", "piece", "RECEIPT", "WH-B"].join(","),
-    ["SKU-055", "2026-02-25", "18", "piece", "ISSUE", "WH-B"].join(","),
-    ["SKU-019", "2026-02-10", "10", "piece", "RECEIPT", "WH-B"].join(","),
-    ["SKU-019", "2026-02-18", "10", "piece", "SCRAP", "WH-B"].join(","),
+    ["item_id", "date", "qty", "uom", "movement_type", "warehouse", "unit_cost", "doc_id"].join(","),
+    ["SKU-102", "2026-02-01", "120", "piece", "RECEIPT", "WH-A", "2.5", "DOC-1001"].join(","),
+    ["SKU-102", "2026-02-15", "40", "piece", "ISSUE", "WH-A", "2.5", "DOC-1010"].join(","),
+    ["SKU-088", "2026-02-01", "900", "piece", "RECEIPT", "WH-A", "1.2", "DOC-1002"].join(","),
+    ["SKU-088", "2026-02-20", "60", "piece", "ISSUE", "WH-A", "1.2", "DOC-1011"].join(","),
+    ["SKU-055", "2026-02-05", "40", "piece", "RECEIPT", "WH-B", "5.0", "DOC-1003"].join(","),
+    ["SKU-055", "2026-02-25", "18", "piece", "ISSUE", "WH-B", "5.0", "DOC-1012"].join(","),
+    ["SKU-019", "2026-02-10", "10", "piece", "RECEIPT", "WH-B", "3.0", "DOC-1004"].join(","),
+    ["SKU-019", "2026-02-18", "10", "piece", "SCRAP", "WH-B", "3.0", "DOC-1013"].join(","),
   ].join("\n");
 }
 
-/** Optional master data. */
 export function getSampleItemsCSV() {
   return [
     ["item_id", "item_name", "category", "default_uom", "shelf_life_days"].join(","),
@@ -865,7 +934,6 @@ export function getSampleItemsCSV() {
   ].join("\n");
 }
 
-/** Optional unit conversions. */
 export function getSampleUomCSV() {
   return [
     ["item_id", "from_uom", "to_uom", "factor"].join(","),
