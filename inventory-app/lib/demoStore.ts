@@ -114,6 +114,7 @@ export function loadMapping(): Mapping | null {
 /** Save thresholds for calculations (client-only). */
 export function saveThresholds(t: Thresholds) {
   const p = readPayloadV1();
+
   // If no upload yet, still allow thresholds to exist
   const base: DemoPayloadV1 =
     p ??
@@ -184,7 +185,7 @@ function detectDelimiter(headerLine: string): "," | ";" | "\t" | "|" {
 function makeUniqueHeaders(headers: string[]): string[] {
   const seen = new Map<string, number>();
   return headers.map((h, idx) => {
-    const base = (h || `col_${idx + 1}`).trim();
+    const base = ((h ?? `col_${idx + 1}`) as string).toString().trim();
     const key = base.toLowerCase();
 
     const n = (seen.get(key) ?? 0) + 1;
@@ -215,7 +216,6 @@ function parseLineWithDelimiter(line: string, delimiter: string): string[] {
     }
 
     if (ch === delimiter && !inQuotes) {
-      // ⚠️ don't trim here; let cleanCell decide
       out.push(cur);
       cur = "";
       continue;
@@ -236,8 +236,6 @@ function parseLineWithDelimiter(line: string, delimiter: string): string[] {
 function cleanCell(x: string): string {
   const s = (x ?? "").toString().trim();
 
-  // Remove wrapping quotes if any: "abc" => abc
-  // but don't remove a single quote at one side by mistake
   if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
     return s.slice(1, -1).trim();
   }
@@ -290,8 +288,6 @@ export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
  * - "1,234" and "1 234"
  * - "(123)" => -123 (accounting negative)
  * - empty => 0
- *
- * Note: Not locale-aware for European "1.234,50" formats (kept demo-simple).
  */
 export function toNumber(x: string): number {
   const raw = (x ?? "").toString().trim();
@@ -301,9 +297,7 @@ export function toNumber(x: string): number {
   const isAccountingNeg = /^\(.*\)$/.test(raw);
   const unwrapped = isAccountingNeg ? raw.slice(1, -1) : raw;
 
-  const cleaned = unwrapped
-    .replace(/[\s,]/g, "") // remove spaces + commas
-    .trim();
+  const cleaned = unwrapped.replace(/[\s,]/g, "").trim();
 
   const n = Number(cleaned);
   const v = Number.isFinite(n) ? n : 0;
@@ -332,24 +326,28 @@ export type MovementsMapping = {
 };
 
 /**
- * NEW: Mapping for movement type VALUES (what "IN" vs "OUT" means)
- * Example:
- *  inValues: ["RECEIPT","GR","101"]
- *  outValues: ["ISSUE","GI","201"]
+ * PRO: Movement type VALUE mapping across ERPs.
+ * Backward compatible with old {inValues,outValues,otherValues}.
  */
 export type MovementTypeValueMapping = {
   inValues: string[];
   outValues: string[];
+
+  // Pro buckets (optional in old saved data)
+  transferValues?: string[];
+  adjustValues?: string[];
+  scrapLossValues?: string[];
+
   otherValues: string[];
 };
 
 export type DemoStateV2 = {
   datasets: Partial<Record<DatasetKey, Dataset>>;
   meta?: { createdAtISO: string };
-  // Mapping for V2 flows
+
   mappingV2?: {
     movements?: MovementsMapping;
-    movementTypeValues?: MovementTypeValueMapping; // ✅ added
+    movementTypeValues?: MovementTypeValueMapping;
   };
 };
 
@@ -450,7 +448,7 @@ export function loadMappingV2(): MovementsMapping | null {
 }
 
 /* -------------------------------
-   V2 Mapping (Movement Type Values)
+   V2 Mapping (Movement Type Values) — PRO
 -------------------------------- */
 
 function normToken(x: string): string {
@@ -471,12 +469,145 @@ function uniqueTokens(arr: string[]): string[] {
   return out;
 }
 
-/** Conservative defaults that work for many demos. User can change later in UI. */
+function normalizeMovementTypeValueMapping(
+  m?: Partial<MovementTypeValueMapping> | null
+): MovementTypeValueMapping {
+  const inValues = uniqueTokens(m?.inValues ?? []);
+  const outValues = uniqueTokens(m?.outValues ?? []);
+
+  const transferValues = uniqueTokens((m as any)?.transferValues ?? []);
+  const adjustValues = uniqueTokens((m as any)?.adjustValues ?? []);
+  const scrapLossValues = uniqueTokens((m as any)?.scrapLossValues ?? []);
+
+  const otherValues = uniqueTokens(m?.otherValues ?? []);
+
+  return {
+    inValues,
+    outValues,
+    transferValues,
+    adjustValues,
+    scrapLossValues,
+    otherValues,
+  };
+}
+
 export function getDefaultMovementTypeValueMapping(): MovementTypeValueMapping {
   return {
-    inValues: ["RECEIPT", "GR", "IN", "PURCHASE", "PO_RECEIPT", "101"],
-    outValues: ["ISSUE", "GI", "OUT", "SALE", "CONSUME", "201"],
-    otherValues: ["TRANSFER", "ADJUST", "SCRAP", "RETURN", "REVERSAL"],
+    inValues: [
+      "IN",
+      "RECEIPT",
+      "RECEIVE",
+      "RCV",
+      "GR",
+      "GOODS_RECEIPT",
+      "PO_RECEIPT",
+      "PURCHASE_RECEIPT",
+      "VENDOR_RECEIPT",
+      "PUTAWAY",
+      "STOCK_IN",
+      "STOCKIN",
+      "ADD",
+      "INBOUND",
+      "PRODUCTION_RECEIPT",
+      "FG_RECEIPT",
+      "COMPLETION",
+      "OUTPUT",
+      "RETURN_TO_STOCK",
+      "SALES_RETURN",
+      "CUSTOMER_RETURN",
+      "RTS",
+      "101",
+      "105",
+      "531",
+    ],
+    outValues: [
+      "OUT",
+      "ISSUE",
+      "GI",
+      "GOODS_ISSUE",
+      "DELIVERY",
+      "SHIP",
+      "SHIPMENT",
+      "DISPATCH",
+      "PICK",
+      "PICKING",
+      "SALE",
+      "SALES",
+      "CONSUME",
+      "CONSUMPTION",
+      "STOCK_OUT",
+      "STOCKOUT",
+      "REMOVE",
+      "DEDUCT",
+      "OUTBOUND",
+      "PRODUCTION_ISSUE",
+      "MATERIAL_ISSUE",
+      "BACKFLUSH",
+      "201",
+      "261",
+      "601",
+    ],
+    transferValues: [
+      "TRANSFER",
+      "STOCK_TRANSFER",
+      "MOVE",
+      "MOVEMENT",
+      "RELOCATION",
+      "RELOCATE",
+      "WH_TRANSFER",
+      "WAREHOUSE_TRANSFER",
+      "LOCATION_TRANSFER",
+      "INTER_WAREHOUSE",
+      "INTER_SITE",
+      "BIN_TO_BIN",
+      "XFER",
+      "301",
+      "311",
+      "641",
+    ],
+    adjustValues: [
+      "ADJUST",
+      "ADJUSTMENT",
+      "INVENTORY_ADJUSTMENT",
+      "CYCLE_COUNT",
+      "COUNT",
+      "RECOUNT",
+      "STOCKTAKE",
+      "PHYSICAL_INVENTORY",
+      "VARIANCE",
+      "CORRECTION",
+      "REVALUATION",
+      "701",
+      "702",
+    ],
+    scrapLossValues: [
+      "SCRAP",
+      "LOSS",
+      "DAMAGE",
+      "DAMAGED",
+      "WASTE",
+      "SHRINK",
+      "SHRINKAGE",
+      "EXPIRED",
+      "OBSOLETE",
+      "REJECT",
+      "REJECTED",
+      "QUALITY_REJECT",
+      "DISPOSAL",
+      "551",
+      "553",
+    ],
+    otherValues: [
+      "OTHER",
+      "REVERSAL",
+      "REVERSE",
+      "CANCEL",
+      "VOID",
+      "RETURN_TO_VENDOR",
+      "RTV",
+      "VENDOR_RETURN",
+      "CORRECTION_REVERSAL",
+    ],
   };
 }
 
@@ -488,21 +619,18 @@ export function saveMovementTypeValueMappingV2(mapping: MovementTypeValueMapping
     };
 
   s.mappingV2 = s.mappingV2 ?? {};
+  s.mappingV2.movementTypeValues = normalizeMovementTypeValueMapping(mapping);
 
-  // clean + unique
-  const cleaned: MovementTypeValueMapping = {
-    inValues: uniqueTokens(mapping?.inValues ?? []),
-    outValues: uniqueTokens(mapping?.outValues ?? []),
-    otherValues: uniqueTokens(mapping?.otherValues ?? []),
-  };
-
-  s.mappingV2.movementTypeValues = cleaned;
   writeStateV2(s);
 }
 
 export function loadMovementTypeValueMappingV2(): MovementTypeValueMapping | null {
   const s = readStateV2();
-  return s?.mappingV2?.movementTypeValues ?? null;
+  const raw = s?.mappingV2?.movementTypeValues as any;
+  if (!raw) return null;
+
+  // Backward compatible normalize
+  return normalizeMovementTypeValueMapping(raw);
 }
 
 export function loadMovementTypeValueMappingV2WithDefault(): MovementTypeValueMapping {
@@ -515,42 +643,62 @@ export type MovementTypeValuesValidation = {
   warnings: string[];
 };
 
-/** Validates that IN/OUT sets don't overlap and are not empty. */
 export function validateMovementTypeValueMapping(
   mapping: MovementTypeValueMapping
 ): MovementTypeValuesValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const ins = uniqueTokens(mapping?.inValues ?? []);
-  const outs = uniqueTokens(mapping?.outValues ?? []);
-  const others = uniqueTokens(mapping?.otherValues ?? []);
+  const m = normalizeMovementTypeValueMapping(mapping);
 
-  if (ins.length === 0)
-    errors.push("IN values list is empty (you must map at least one IN/receipt value).");
-  if (outs.length === 0)
-    errors.push("OUT values list is empty (you must map at least one OUT/issue value).");
+  if (m.inValues.length === 0) {
+    errors.push("IN values list is empty (map at least one receipt/inbound value).");
+  }
+  if (m.outValues.length === 0) {
+    errors.push("OUT values list is empty (map at least one issue/outbound value).");
+  }
 
-  const inSet = new Set(ins.map(normToken));
-  const outSet = new Set(outs.map(normToken));
+  const sets = {
+    IN: new Set(m.inValues.map(normToken)),
+    OUT: new Set(m.outValues.map(normToken)),
+    TRANSFER: new Set((m.transferValues ?? []).map(normToken)),
+    ADJUST: new Set((m.adjustValues ?? []).map(normToken)),
+    SCRAP_LOSS: new Set((m.scrapLossValues ?? []).map(normToken)),
+    OTHER: new Set(m.otherValues.map(normToken)),
+  };
 
-  const overlap: string[] = [];
-  for (const t of inSet) if (outSet.has(t)) overlap.push(t);
+  const buckets = Object.keys(sets) as Array<keyof typeof sets>;
+  const overlaps: string[] = [];
 
-  if (overlap.length > 0) {
+  for (let i = 0; i < buckets.length; i++) {
+    for (let j = i + 1; j < buckets.length; j++) {
+      const A = buckets[i];
+      const B = buckets[j];
+      for (const t of sets[A]) {
+        if (sets[B].has(t)) overlaps.push(`${t} (${A} & ${B})`);
+      }
+    }
+  }
+
+  if (overlaps.length > 0) {
     errors.push(
-      `IN/OUT lists overlap (same value in both): ${overlap
-        .slice(0, 8)
-        .join(", ")}${overlap.length > 8 ? "..." : ""}`
+      `Same value appears in multiple buckets: ${overlaps.slice(0, 10).join(", ")}${
+        overlaps.length > 10 ? "..." : ""
+      }`
     );
   }
 
-  // Not an error, but good to flag
-  const otherSet = new Set(others.map(normToken));
-  let otherOverlap = 0;
-  for (const t of otherSet) if (inSet.has(t) || outSet.has(t)) otherOverlap++;
-  if (otherOverlap > 0)
-    warnings.push("Some OTHER values also exist in IN/OUT lists. Consider removing duplicates.");
+  const totalTagged =
+    m.inValues.length +
+    m.outValues.length +
+    (m.transferValues?.length ?? 0) +
+    (m.adjustValues?.length ?? 0) +
+    (m.scrapLossValues?.length ?? 0) +
+    m.otherValues.length;
+
+  if (totalTagged < 3) {
+    warnings.push("Very few movement types mapped. Results may be weak until you map more values.");
+  }
 
   return { ok: errors.length === 0, errors, warnings };
 }
@@ -588,7 +736,6 @@ function looksLikeDate(x: string): boolean {
   const s = (x ?? "").toString().trim();
   if (!s) return false;
 
-  // Date.parse handles many formats; we just ensure it's not NaN
   const t = Date.parse(s);
   return Number.isFinite(t);
 }
@@ -608,7 +755,6 @@ export function validateMovementsDataset(
     errors.push("Missing required mapping fields (Item ID, Date, Qty, Movement Type).");
   }
 
-  // ensure required columns exist in headers
   for (const col of requiredCols) {
     if (!headers.includes(col)) errors.push(`Mapped column not found in CSV headers: "${col}".`);
   }
@@ -628,7 +774,7 @@ export function validateMovementsDataset(
     };
   }
 
-  const sampleSize = Math.min(rows.length, 200); // enough to catch issues quickly
+  const sampleSize = Math.min(rows.length, 200);
   let missingReq = 0;
   let badQty = 0;
   let badDate = 0;
@@ -652,28 +798,26 @@ export function validateMovementsDataset(
 
   if (rows.length === 0) errors.push("Movements.csv has headers but no data rows.");
 
-  // hard-fail conditions
   if (missingReq === sampleSize && sampleSize > 0) {
     errors.push(
       "Movements sample rows are missing required values (item/date/qty/type). Check mapping or CSV data."
     );
   }
 
-  // warnings (not hard fail)
   if (badQty > 0) warnings.push(`Quantity looks non-numeric in ${badQty}/${sampleSize} checked rows.`);
   if (badDate > 0) warnings.push(`Date looks unparseable in ${badDate}/${sampleSize} checked rows.`);
 
-  // hint for negative qty reality
   let neg = 0;
   for (let i = 0; i < sampleSize; i++) {
     const qRaw = (rows[i]?.[mapping.qty] ?? "").toString().trim();
     const n = toNumber(qRaw);
     if (Number.isFinite(n) && n < 0) neg++;
   }
-  if (neg > 0)
+  if (neg > 0) {
     warnings.push(
-      `Detected negative quantities in ${neg}/${sampleSize} checked rows (this is common in some ERPs).`
+      `Detected negative quantities in ${neg}/${sampleSize} checked rows (common in some systems).`
     );
+  }
 
   const ok = errors.length === 0;
 
