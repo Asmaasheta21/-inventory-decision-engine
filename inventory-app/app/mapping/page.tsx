@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadDatasetV2,
@@ -65,9 +66,7 @@ export default function MappingPage() {
   );
 
   const [uom, setUom] = useState<string>(
-    saved?.uom ||
-      guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) ||
-      ""
+    saved?.uom || guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) || ""
   );
 
   // Separate boxes: errors vs warnings
@@ -77,13 +76,13 @@ export default function MappingPage() {
   const [canContinue, setCanContinue] = useState<boolean>(true);
 
   const styles = useMemo(() => {
-    const card: React.CSSProperties = {
+    const card: CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
       background: "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
     };
 
-    const btn: React.CSSProperties = {
+    const btn: CSSProperties = {
       padding: "10px 14px",
       borderRadius: 12,
       fontWeight: 800,
@@ -98,25 +97,25 @@ export default function MappingPage() {
     };
 
     return {
-      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as React.CSSProperties,
-      container: { maxWidth: 1080, margin: "0 auto", padding: "18px 20px 60px" } as React.CSSProperties,
+      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
+      container: { maxWidth: 1080, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
       topbar: {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         gap: 12,
         marginBottom: 18,
-      } as React.CSSProperties,
-      brand: { display: "flex", alignItems: "center", gap: 10 } as React.CSSProperties,
-      logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as React.CSSProperties,
-      title: { fontWeight: 900, letterSpacing: 0.2 } as React.CSSProperties,
-      subtitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
-      link: { color: "#b7bed1", textDecoration: "none", padding: "8px 10px", borderRadius: 10, border: "1px solid transparent" } as React.CSSProperties,
+      } as CSSProperties,
+      brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
+      logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as CSSProperties,
+      title: { fontWeight: 900, letterSpacing: 0.2 } as CSSProperties,
+      subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      link: { color: "#b7bed1", textDecoration: "none", padding: "8px 10px", borderRadius: 10, border: "1px solid transparent" } as CSSProperties,
 
-      hero: { display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 } as React.CSSProperties,
+      hero: { display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 } as CSSProperties,
 
       card,
-      cardPad: { ...card, padding: 18 } as React.CSSProperties,
+      cardPad: { ...card, padding: 18 } as CSSProperties,
 
       pill: {
         display: "inline-block",
@@ -127,15 +126,15 @@ export default function MappingPage() {
         color: "#dfe3f1",
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      h1: { margin: "10px 0 8px", fontSize: 30, lineHeight: 1.15 } as React.CSSProperties,
-      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
+      h1: { margin: "10px 0 8px", fontSize: 30, lineHeight: 1.15 } as CSSProperties,
+      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
 
-      grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 } as React.CSSProperties,
+      grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 } as CSSProperties,
 
-      field: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      label: { fontSize: 12, color: "#aab1c4", marginBottom: 8 } as React.CSSProperties,
+      field: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      label: { fontSize: 12, color: "#aab1c4", marginBottom: 8 } as CSSProperties,
       select: {
         width: "100%",
         padding: "10px 10px",
@@ -143,20 +142,20 @@ export default function MappingPage() {
         border: "1px solid #2a3350",
         background: "#0b0f1a",
         color: "#e6e8ee",
-      } as React.CSSProperties,
-      hint: { marginTop: 8, fontSize: 12, color: "#8f97ad", lineHeight: 1.5 } as React.CSSProperties,
+      } as CSSProperties,
+      hint: { marginTop: 8, fontSize: 12, color: "#8f97ad", lineHeight: 1.5 } as CSSProperties,
 
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as React.CSSProperties,
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as CSSProperties,
 
-      btnPrimary: { ...btn, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as React.CSSProperties,
-      btnGhost: { ...btn, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as React.CSSProperties,
+      btnPrimary: { ...btn, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
+      btnGhost: { ...btn, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as CSSProperties,
       btnDisabled: {
         ...btn,
         background: "rgba(255,255,255,0.06)",
         border: "1px solid rgba(255,255,255,0.08)",
         color: "rgba(230,232,238,0.55)",
         cursor: "not-allowed",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       // Notice boxes (premium)
       boxBase: {
@@ -164,34 +163,34 @@ export default function MappingPage() {
         padding: 12,
         borderRadius: 12,
         lineHeight: 1.55,
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       boxError: {
         border: "1px solid rgba(255,80,80,0.35)",
         background: "rgba(255,80,80,0.08)",
         color: "#ffd4d4",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       boxWarn: {
         border: "1px solid rgba(255,196,0,0.28)",
         background: "rgba(255,196,0,0.08)",
         color: "#ffe9b3",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      boxTitle: { fontWeight: 950, marginBottom: 6 } as React.CSSProperties,
-      boxList: { margin: 0, paddingLeft: 18 } as React.CSSProperties,
+      boxTitle: { fontWeight: 950, marginBottom: 6 } as CSSProperties,
+      boxList: { margin: 0, paddingLeft: 18 } as CSSProperties,
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 } as React.CSSProperties,
-      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      kpiTitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
-      kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 14 } as CSSProperties,
+      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as CSSProperties,
 
-      tableWrap: { marginTop: 14, overflowX: "auto" } as React.CSSProperties,
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
-      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as React.CSSProperties,
-      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as React.CSSProperties,
-      note: { marginTop: 12, fontSize: 12, color: "#8f97ad" } as React.CSSProperties,
+      tableWrap: { marginTop: 14, overflowX: "auto" } as CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as CSSProperties,
+      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as CSSProperties,
+      tr: { background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as CSSProperties,
+      note: { marginTop: 12, fontSize: 12, color: "#8f97ad" } as CSSProperties,
 
       badge: {
         display: "inline-block",
@@ -202,7 +201,7 @@ export default function MappingPage() {
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
         color: "#dfe3f1",
-      } as React.CSSProperties,
+      } as CSSProperties,
     };
   }, []);
 
@@ -281,12 +280,13 @@ export default function MappingPage() {
     };
   }
 
-  function runFullValidation(showWarnings: boolean) {
+  // ✅ FIXED: return validation result synchronously (no reliance on canContinue state)
+  function runFullValidation(showWarnings: boolean): { ok: boolean; warned: boolean } {
     // 1) basic mapping validation
     const basicErrs = basicMappingValidate();
     if (basicErrs.length) {
       setErrorBox("Fix mapping", basicErrs);
-      return;
+      return { ok: false, warned: false };
     }
 
     // 2) dataset validation using mapping
@@ -294,19 +294,18 @@ export default function MappingPage() {
     const v = validateMovementsDataset(headers, movements?.rows ?? [], mapping);
 
     if (!v.ok) {
-      // combine + make it readable
-      const lines = [...v.errors];
-      setErrorBox("Dataset validation failed", lines);
-      return;
+      setErrorBox("Dataset validation failed", [...v.errors]);
+      return { ok: false, warned: false };
     }
 
     // if ok but warnings exist
     if (showWarnings && v.warnings.length) {
       setWarningBox("Looks good, but please review", v.warnings);
-      return;
+      return { ok: true, warned: true };
     }
 
     clearBox();
+    return { ok: true, warned: false };
   }
 
   // Live validation: run when user changes mapping selections
@@ -317,19 +316,15 @@ export default function MappingPage() {
   }, [itemId, date, qty, movementType, warehouse, uom]);
 
   function continueNext() {
-    // show warnings on Continue (but don't block)
-    runFullValidation(true);
+    const r = runFullValidation(true);
 
-    // if blocking errors, stop
-    if (!canContinue) return;
+    // ✅ if blocking errors, stop immediately
+    if (!r.ok) return;
 
     const mapping = buildMapping();
-
-    // save mapping
     saveMappingV2(mapping);
 
-    // next step later: movement type value mapping
-   router.push("/movement-types");
+    router.push("/movement-types");
   }
 
   const mappedRequiredCount = [itemId, date, qty, movementType].filter(Boolean).length;
