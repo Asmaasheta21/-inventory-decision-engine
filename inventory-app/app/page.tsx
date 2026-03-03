@@ -32,7 +32,11 @@ export default function Home() {
       const mvTypes = loadMovementTypeValueMappingV2WithDefault();
 
       const hasMovements = !!movements?.rows?.length;
-      const hasMapping = !!mapping?.itemId && !!mapping?.date && !!mapping?.qty && !!mapping?.movementType;
+      const hasMapping =
+        !!mapping?.itemId &&
+        !!mapping?.date &&
+        !!mapping?.qty &&
+        !!mapping?.movementType;
       const hasTypes = !!mvTypes;
       const rows = movements?.rows?.length ?? 0;
 
@@ -50,10 +54,13 @@ export default function Home() {
   }, [status]);
 
   const nextCta = useMemo(() => {
-    if (nextStep === "UPLOAD") return { label: "Start Demo: Upload CSV", href: "/upload" };
-    if (nextStep === "MAPPING") return { label: "Continue: Map Columns", href: "/mapping" };
-    if (nextStep === "TYPES") return { label: "Continue: Movement Types", href: "/movement-types" };
-    return { label: "Open Results", href: "/results" };
+    if (nextStep === "UPLOAD")
+      return { label: "Start validation: Upload CSV", href: "/upload" };
+    if (nextStep === "MAPPING")
+      return { label: "Continue: Define fields (mapping)", href: "/mapping" };
+    if (nextStep === "TYPES")
+      return { label: "Continue: Classify movement types", href: "/movement-types" };
+    return { label: "Open execution list", href: "/results" };
   }, [nextStep]);
 
   const statusLine = useMemo(() => {
@@ -68,7 +75,8 @@ export default function Home() {
     const card: CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
-      background: "linear-gradient(180deg, rgba(18,24,43,0.88), rgba(12,16,28,0.88))",
+      background:
+        "linear-gradient(180deg, rgba(18,24,43,0.88), rgba(12,16,28,0.88))",
     };
 
     const softCard: CSSProperties = {
@@ -154,8 +162,16 @@ export default function Home() {
     };
 
     return {
-      wrap: { minHeight: "100vh", fontFamily: "Arial, sans-serif", color: "#e6e8ee" } as CSSProperties,
-      container: { maxWidth: 1150, margin: "0 auto", padding: "18px 20px" } as CSSProperties,
+      wrap: {
+        minHeight: "100vh",
+        fontFamily: "Arial, sans-serif",
+        color: "#e6e8ee",
+      } as CSSProperties,
+      container: {
+        maxWidth: 1150,
+        margin: "0 auto",
+        padding: "18px 20px",
+      } as CSSProperties,
 
       topbar: {
         display: "flex",
@@ -166,14 +182,33 @@ export default function Home() {
       } as CSSProperties,
 
       brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
-      logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as CSSProperties,
+      logo: {
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+      } as CSSProperties,
       title: { fontWeight: 950, letterSpacing: 0.2 } as CSSProperties,
       subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
 
       link,
-      btnPrimary: { ...btnBase, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
-      btnGhost: { ...btnBase, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as CSSProperties,
-      btnSoft: { ...btnBase, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", color: "#e6e8ee" } as CSSProperties,
+      btnPrimary: {
+        ...btnBase,
+        background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+        color: "#0b0f1a",
+      } as CSSProperties,
+      btnGhost: {
+        ...btnBase,
+        background: "transparent",
+        border: "1px solid #2a3350",
+        color: "#e6e8ee",
+      } as CSSProperties,
+      btnSoft: {
+        ...btnBase,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        color: "#e6e8ee",
+      } as CSSProperties,
 
       section: { padding: "34px 20px" } as CSSProperties,
       hero: { padding: "58px 20px 24px" } as CSSProperties,
@@ -187,26 +222,50 @@ export default function Home() {
         alignItems: "start",
       } as CSSProperties,
 
-      h1: { margin: "14px 0 10px", fontSize: 44, lineHeight: 1.12, letterSpacing: -0.6 } as CSSProperties,
+      h1: {
+        margin: "14px 0 10px",
+        fontSize: 44,
+        lineHeight: 1.12,
+        letterSpacing: -0.6,
+      } as CSSProperties,
       h2: { margin: "0 0 14px", fontSize: 28 } as CSSProperties,
-      p: { margin: 0, color: "#b7bed1", fontSize: 16, lineHeight: 1.7 } as CSSProperties,
+      p: {
+        margin: 0,
+        color: "#b7bed1",
+        fontSize: 16,
+        lineHeight: 1.7,
+      } as CSSProperties,
       small: { fontSize: 12, color: "#8f97ad", lineHeight: 1.6 } as CSSProperties,
 
       card,
       softCard,
 
-      grid3: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 } as CSSProperties,
+      grid3: {
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 14,
+      } as CSSProperties,
       grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 } as CSSProperties,
 
       // status row
-      statusRow: { marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" } as CSSProperties,
+      statusRow: {
+        marginTop: 14,
+        display: "flex",
+        gap: 10,
+        flexWrap: "wrap",
+        alignItems: "center",
+      } as CSSProperties,
       badgeOk,
       badgeWarn,
       badgeBad,
 
       // workflow strip
       flowWrap: { marginTop: 12, padding: 14, ...softCard } as CSSProperties,
-      flowGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 } as CSSProperties,
+      flowGrid: {
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: 10,
+      } as CSSProperties,
 
       // pro lock
       proLock: {
@@ -218,7 +277,11 @@ export default function Home() {
         color: "#e6dcff",
       } as CSSProperties,
 
-      footer: { borderTop: "1px solid #1b2340", padding: "18px 20px", color: "#8f97ad" } as CSSProperties,
+      footer: {
+        borderTop: "1px solid #1b2340",
+        padding: "18px 20px",
+        color: "#8f97ad",
+      } as CSSProperties,
       pill,
     };
   }, []);
@@ -232,6 +295,13 @@ export default function Home() {
       : { style: styles.badgeBad, text: `Status: Not started • ${statusLine}` };
   }, [status, statusLine, styles.badgeBad, styles.badgeOk, styles.badgeWarn]);
 
+  const secondaryCta = useMemo(() => {
+    if (status.hasMovements && status.hasMapping && status.hasTypes) {
+      return { label: "Open execution list", href: "/results" };
+    }
+    return { label: "View results (if ready)", href: "/results" };
+  }, [status]);
+
   return (
     <main className="bg-breathe" style={styles.wrap}>
       {/* Top bar */}
@@ -241,7 +311,9 @@ export default function Home() {
             <div style={styles.logo} />
             <div>
               <div style={styles.title}>Inventory Decision Engine</div>
-              <div style={styles.subtitle}>Ops-grade actions from messy exports</div>
+              <div style={styles.subtitle}>
+                Inventory state intelligence • ranked actions • evidence
+              </div>
             </div>
           </div>
 
@@ -269,38 +341,44 @@ export default function Home() {
       <section className="anim-in anim-delay-2" style={styles.hero}>
         <div style={styles.heroGrid} className="hero-grid">
           <div>
-            <span style={styles.pill}>⚡ Decisions + advice + evidence</span>
+            <span style={styles.pill}>⚡ Policy-driven decisions • traceable evidence</span>
 
             <h1 style={styles.h1}>
-              Stop debating spreadsheets.
+              Know your true inventory state.
               <br />
-              Get a ranked action list you can execute today.
+              Execute the right action — today.
             </h1>
 
-            <p style={{ ...styles.p, maxWidth: 640 }}>
-              Upload exports, map columns once, and get decisions with evidence:
-              <b style={{ color: "#e6e8ee" }}> stockout risk</b>, <b style={{ color: "#e6e8ee" }}>overstock</b>,{" "}
-              <b style={{ color: "#e6e8ee" }}>dead stock</b>, plus <b style={{ color: "#e6e8ee" }}>suggested order qty</b>.
-              Built around ops signals: <b style={{ color: "#e6e8ee" }}>trend</b>, <b style={{ color: "#e6e8ee" }}>volatility</b>,{" "}
-              <b style={{ color: "#e6e8ee" }}>active-demand days</b>, and <b style={{ color: "#e6e8ee" }}>loss</b>.
+            <p style={{ ...styles.p, maxWidth: 680 }}>
+              Convert messy exports into a governed decision layer: each item is classified by{" "}
+              <b style={{ color: "#e6e8ee" }}>risk</b>,{" "}
+              <b style={{ color: "#e6e8ee" }}>excess</b>,{" "}
+              <b style={{ color: "#e6e8ee" }}>no-demand exposure</b>, and{" "}
+              <b style={{ color: "#e6e8ee" }}>loss signals</b>. Then you get a ranked execution list with{" "}
+              <b style={{ color: "#e6e8ee" }}>what to do</b> +{" "}
+              <b style={{ color: "#e6e8ee" }}>why</b> — aligned to your policy thresholds.
+              <br />
+              <span style={{ color: "#aab1c4" }}>
+                Built for Ops execution. Trusted by Finance via measurable impact (stockouts ↓, working capital ↑, write-offs ↓).
+              </span>
             </p>
 
             <div style={{ marginTop: 18, display: "flex", gap: 12, flexWrap: "wrap" }}>
               <a className="btn-glow" href={nextCta.href} style={styles.btnPrimary}>
                 {nextCta.label}
               </a>
-              <a className="btn-glow" href="/results" style={styles.btnGhost}>
-                Open Results
+              <a className="btn-glow" href={secondaryCta.href} style={styles.btnGhost}>
+                {secondaryCta.label}
               </a>
               <a className="btn-glow" href="#pricing" style={styles.btnSoft}>
-                See plans
+                Compare plans
               </a>
             </div>
 
             <div style={styles.statusRow}>
               <span style={statusBadge.style}>{statusBadge.text}</span>
               <span style={styles.small}>
-                Demo data is <b style={{ color: "#e6e8ee" }}>session-only</b>. Nothing is stored on the server.
+                Demo runs in your browser only (session). No server storage.
                 {status.rows ? (
                   <>
                     {" "}
@@ -312,10 +390,19 @@ export default function Home() {
 
             {/* Workflow strip */}
             <div id="workflow" style={styles.flowWrap} className="hover-lift">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 950 }}>Workflow (no guessing)</div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ fontWeight: 950 }}>Workflow (deterministic)</div>
                 <span style={{ ...styles.small, color: "#aab1c4" }}>
-                  Required fields: <b style={{ color: "#e6e8ee" }}>itemId, date, qty, movementType</b> (warehouse optional)
+                  Required fields:{" "}
+                  <b style={{ color: "#e6e8ee" }}>itemId, date, qty, movementType</b> (warehouse optional)
                 </span>
               </div>
 
@@ -324,7 +411,7 @@ export default function Home() {
                   <StepCard
                     idx={1}
                     title="Upload"
-                    desc="Preview rows + headers. Validate the file is readable."
+                    desc="Preview rows and headers. Confirm the file is readable."
                     done={status.hasMovements}
                     href="/upload"
                     cta="Upload CSV"
@@ -333,16 +420,16 @@ export default function Home() {
                   <StepCard
                     idx={2}
                     title="Mapping"
-                    desc="Choose which columns represent required fields."
+                    desc="Define which columns represent the required fields."
                     done={status.hasMapping}
                     href="/mapping"
-                    cta="Map columns"
+                    cta="Define fields"
                     active={nextStep === "MAPPING"}
                   />
                   <StepCard
                     idx={3}
-                    title="Type values"
-                    desc="Classify movement type values into IN / OUT / OTHER."
+                    title="Movement types"
+                    desc="Classify values into IN / OUT / OTHER (to separate demand vs non-demand)."
                     done={status.hasTypes}
                     href="/movement-types"
                     cta="Classify values"
@@ -350,11 +437,11 @@ export default function Home() {
                   />
                   <StepCard
                     idx={4}
-                    title="Results"
-                    desc="Ranked action list + evidence + advice per SKU."
+                    title="Execution"
+                    desc="Ranked action list + decision evidence + next steps per item."
                     done={status.hasMovements && status.hasMapping && status.hasTypes}
                     href="/results"
-                    cta="Open results"
+                    cta="Open execution list"
                     active={nextStep === "RESULTS"}
                   />
                 </div>
@@ -369,31 +456,31 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right: Ops Control Preview (stronger) */}
+          {/* Right: Inventory State Preview */}
           <div className="hover-lift anim-in anim-delay-3" style={{ ...styles.card, padding: 16, alignSelf: "start" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontWeight: 950 }}>Ops Control — Snapshot</div>
-              <div style={{ fontSize: 12, color: "#aab1c4" }}>What stakeholders want</div>
+              <div style={{ fontWeight: 950 }}>Inventory State — Overview</div>
+              <div style={{ fontSize: 12, color: "#aab1c4" }}>Decision governance, operationalized</div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <MiniMetric title="Order now" value="18" hint="Below policy ROP" />
-              <MiniMetric title="Watch" value="27" hint="Near threshold band" />
-              <MiniMetric title="Reduce" value="42" hint="Overstock cover" />
-              <MiniMetric title="Loss signal" value="9" hint="Scrap / rejects" />
+              <MiniMetric title="Order" value="18" hint="Below policy threshold" />
+              <MiniMetric title="Monitor" value="27" hint="Approaching risk band" />
+              <MiniMetric title="Reduce" value="42" hint="Excess cover vs target" />
+              <MiniMetric title="Loss exposure" value="9" hint="Scrap / rejects / damage" />
             </div>
 
             <div style={{ ...styles.softCard, marginTop: 12, padding: 12 }}>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>Today’s playbook</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>Execution playbook (today)</div>
               <ul style={{ margin: 0, paddingLeft: 18, color: "#c8cee0", lineHeight: 1.7, fontSize: 14 }}>
                 <li>
-                  Approve urgent buys for <b>ORDER_NOW</b> lines (prevent stockout).
+                  Prioritize purchase approvals for <b>ORDER</b> lines to prevent stockout.
                 </li>
                 <li>
-                  Freeze purchasing on <b>REDUCE</b> lines and plan clearance.
+                  Pause buying on <b>REDUCE</b> lines; plan consumption/clearance.
                 </li>
                 <li>
-                  Set a short review cycle for <b>WATCH</b> lines (every 3 days).
+                  Review <b>MONITOR</b> lines on a short cadence (e.g., every 3 days).
                 </li>
               </ul>
 
@@ -407,18 +494,23 @@ export default function Home() {
 
             {/* Pro tease */}
             <div style={styles.proLock}>
-              <div style={{ fontWeight: 950 }}>🔒 Pro adds</div>
+              <div style={{ fontWeight: 950 }}>🔒 Pro & Team unlock</div>
               <div style={{ marginTop: 8, ...styles.small, color: "#e6dcff" }}>
-                • Transfer suggestion before buying (across warehouses)
+                • Saved runs + history (auditability)
                 <br />
-                • Saved runs + exports (CSV/PDF)
+                • Exports (CSV/PDF) for approvals & execution
+                <br />
+                • Cross-warehouse transfer suggestions (before buying)
                 <br />
                 • Alerts + scheduled review cadence
               </div>
             </div>
 
             <div style={{ marginTop: 12, ...styles.small }}>
-              Output is decision-first: <b style={{ color: "#e6e8ee" }}>what to do</b> + <b style={{ color: "#e6e8ee" }}>why</b>.
+              The output is decision-first:{" "}
+              <b style={{ color: "#e6e8ee" }}>action</b> +{" "}
+              <b style={{ color: "#e6e8ee" }}>evidence</b> +{" "}
+              <b style={{ color: "#e6e8ee" }}>next step</b>.
             </div>
           </div>
         </div>
@@ -429,9 +521,21 @@ export default function Home() {
         <div style={{ ...styles.container, padding: 0 }}>
           <div style={{ ...styles.small, marginBottom: 10 }}>Why teams use it</div>
           <div style={styles.grid3} className="three-col">
-            <Feature title="Fewer stockouts" desc="Policy-based reorder point + volatility buffers + trend. Not a random formula." badge="Ops" />
-            <Feature title="Less cash trapped" desc="Detect overstock by cover horizon and low velocity. Push reduce/stop-buy actions." badge="Finance" />
-            <Feature title="Cleaner approvals" desc="Evidence chips: profile, trend, CV, active days, loss. Easier leadership decisions." badge="Leadership" />
+            <Feature
+              title="Fewer stockouts"
+              desc="Policy-aligned reorder decisions with volatility sensitivity and trend confirmation."
+              badge="Ops"
+            />
+            <Feature
+              title="More working capital"
+              desc="Identify excess cover beyond your target horizon and trigger reduce/stop actions."
+              badge="Finance"
+            />
+            <Feature
+              title="Faster approvals"
+              desc="Traceable evidence per decision (profile, trend, CV, active-demand days, loss exposure)."
+              badge="Leadership"
+            />
           </div>
         </div>
       </section>
@@ -442,32 +546,33 @@ export default function Home() {
           <h2 style={styles.h2}>What’s inside</h2>
           <div style={{ ...styles.grid2, alignItems: "start" }} className="two-col">
             <div style={{ ...styles.card, padding: 18 }}>
-              <div style={{ fontWeight: 950, fontSize: 16 }}>Engine signals (built-in)</div>
+              <div style={{ fontWeight: 950, fontSize: 16 }}>Signals (built-in)</div>
               <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
                 <Bullet title="Demand profile" desc="Stable / Intermittent / Lumpy / Declining / New." />
-                <Bullet title="Trend" desc="Last 30 vs previous 30 (normalized -1..+1)." />
-                <Bullet title="Volatility" desc="Daily OUT variability (std + CV) to avoid under-ordering." />
-                <Bullet title="Loss signal" desc="Scrap / reject / damage tracked separately from demand." />
+                <Bullet title="Trend" desc="Recent demand vs prior period (normalized -1..+1)." />
+                <Bullet title="Volatility" desc="Variability index (std + CV) to reduce false positives." />
+                <Bullet title="Loss exposure" desc="Scrap/reject/damage separated from true demand signals." />
               </div>
             </div>
 
             <div style={{ ...styles.card, padding: 18 }}>
-              <div style={{ fontWeight: 950, fontSize: 16 }}>Ops-ready decisioning</div>
+              <div style={{ fontWeight: 950, fontSize: 16 }}>Decisioning (ops-ready)</div>
               <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                <Bullet title="Order now" desc="Below policy ROP or negative on-hand." />
-                <Bullet title="Watch band" desc="Near threshold band to avoid false positives." />
-                <Bullet title="Reduce / Dead" desc="Overstock cover or no demand." />
-                <Bullet title="Advice layer" desc="Each SKU gets next steps + review cadence + confidence." />
+                <Bullet title="Order" desc="Below policy threshold or negative on-hand exposure." />
+                <Bullet title="Monitor band" desc="Near threshold band to avoid noisy flips." />
+                <Bullet title="Reduce / Dead" desc="Excess cover or no active demand signal." />
+                <Bullet title="Advice layer" desc="Next steps, review cadence, and confidence per item." />
               </div>
 
               <div style={{ marginTop: 12, ...styles.small }}>
-                Confidence uses <b style={{ color: "#e6e8ee" }}>active-demand days</b> + <b style={{ color: "#e6e8ee" }}>CV</b> so you know how much to trust the signal.
+                Confidence is tied to <b style={{ color: "#e6e8ee" }}>active-demand days</b> and{" "}
+                <b style={{ color: "#e6e8ee" }}>CV</b> so teams know how much to trust the signal.
               </div>
             </div>
           </div>
 
           <div style={{ marginTop: 14, ...styles.small }}>
-            Warehouse column is optional. If it’s missing, the system aggregates under a default warehouse (still valid).
+            Warehouse is optional. If missing, results are aggregated under a default warehouse (still valid for decisioning).
           </div>
         </div>
       </section>
@@ -477,24 +582,33 @@ export default function Home() {
         <div style={{ ...styles.container, padding: 0 }}>
           <h2 style={styles.h2}>Pricing</h2>
           <p style={{ margin: "0 0 18px", color: "#b7bed1", lineHeight: 1.6 }}>
-            Start with Demo to validate your data. Upgrade when you need saving, exports, sharing, and multi-warehouse workflows.
+            Start with Demo to validate your exports and mapping. Upgrade when you need governance features:
+            saved runs, exports, sharing, and multi-warehouse execution workflows.
           </p>
 
           <div style={styles.grid3} className="three-col">
             <PlanCard
               name="Demo"
               price="$0"
-              note="Try the workflow"
+              note="Validation"
               highlight={false}
               items={[
                 "Upload CSV + preview",
-                "Column mapping (required fields)",
-                "Movement Type Values mapping",
-                "Ranked results table",
-                "Local-only storage (session)",
+                "Field mapping (required fields)",
+                "Movement type value classification",
+                "Ranked execution list",
+                "Session-only (browser)",
               ]}
-              cta={nextStep === "UPLOAD" ? "Start Demo" : "Continue Demo"}
-              href={nextStep === "UPLOAD" ? "/upload" : nextStep === "MAPPING" ? "/mapping" : nextStep === "TYPES" ? "/movement-types" : "/results"}
+              cta={nextStep === "UPLOAD" ? "Start validation" : "Continue validation"}
+              href={
+                nextStep === "UPLOAD"
+                  ? "/upload"
+                  : nextStep === "MAPPING"
+                  ? "/mapping"
+                  : nextStep === "TYPES"
+                  ? "/movement-types"
+                  : "/results"
+              }
             />
 
             <PlanCard
@@ -503,13 +617,13 @@ export default function Home() {
               note="per month"
               highlight={true}
               items={[
-                "Save runs + history",
+                "Saved runs + history (auditability)",
                 "Export actions to CSV/PDF",
                 "Advanced policy presets",
-                "Custom loss tokens UI",
-                "Alerts & scheduled review (coming)",
+                "Custom loss token controls",
+                "Alerts & scheduled review (roadmap)",
               ]}
-              cta="Coming soon"
+              cta="Request early access"
               href="#"
             />
 
@@ -522,16 +636,16 @@ export default function Home() {
                 "Multi-warehouse workflows",
                 "Transfer suggestions (before buying)",
                 "Roles & sharing",
-                "Audit trail for decisions",
+                "Decision audit trail",
                 "Priority support",
               ]}
-              cta="Coming soon"
+              cta="Request early access"
               href="#"
             />
           </div>
 
           <div style={{ marginTop: 14, ...styles.small }}>
-            Want enterprise later? Add connectors + SSO + custom policy library.
+            Enterprise roadmap: connectors + SSO + custom policy library + SLA.
           </div>
         </div>
       </section>
@@ -542,12 +656,21 @@ export default function Home() {
           <h2 style={styles.h2}>FAQ</h2>
 
           <div style={styles.grid2} className="two-col">
-            <Faq q="Do I need a database or ERP integration?" a="No. The demo starts from CSV exports. Integrations can come later." />
-            <Faq q="Is warehouse required?" a="No. Warehouse is optional. If you don’t map it, results are aggregated under a default warehouse." />
-            <Faq q="Is my data stored?" a="Demo is session-only on your browser. Pro adds saved runs and exports." />
+            <Faq
+              q="Do I need a database or ERP integration?"
+              a="No. The demo works from structured exports (CSV). Enterprise connectors can be added later."
+            />
+            <Faq
+              q="Is warehouse required?"
+              a="No. Warehouse is optional. If you don’t map it, the engine aggregates results under a default warehouse."
+            />
+            <Faq
+              q="Is my data stored?"
+              a="Demo is session-only in your browser. Pro adds saved runs, exports, and traceability."
+            />
             <Faq
               q="What makes it “ops-grade”?"
-              a="It’s not just averages. It uses profiles, trend, volatility, active-demand days, and loss signals — and shows evidence for every decision."
+              a="It’s decision-first and policy-aligned. It uses demand profile, trend, volatility (CV), active-demand days, and loss exposure — and shows evidence for every action."
             />
           </div>
 
@@ -556,7 +679,7 @@ export default function Home() {
               {nextCta.label}
             </a>
             <a className="btn-glow" href="/results" style={styles.btnGhost}>
-              Open Results
+              {secondaryCta.label}
             </a>
           </div>
         </div>
@@ -564,7 +687,16 @@ export default function Home() {
 
       {/* Footer */}
       <footer style={styles.footer}>
-        <div style={{ maxWidth: 1150, margin: "0 auto", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div
+          style={{
+            maxWidth: 1150,
+            margin: "0 auto",
+            display: "flex",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+          }}
+        >
           <span>© {new Date().getFullYear()} Inventory Decision Engine</span>
           <span style={{ fontSize: 12 }}>Next.js • Vercel • Client-only demo storage</span>
         </div>
@@ -665,7 +797,15 @@ export default function Home() {
 
 function MiniMetric({ title, value, hint }: { title: string; value: string; hint: string }) {
   return (
-    <div className="hover-lift" style={{ padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" }}>
+    <div
+      className="hover-lift"
+      style={{
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.55)",
+      }}
+    >
       <div style={{ fontSize: 12, color: "#aab1c4" }}>{title}</div>
       <div style={{ fontSize: 22, fontWeight: 950, marginTop: 6 }}>{value}</div>
       <div style={{ fontSize: 12, color: "#8f97ad", marginTop: 4 }}>{hint}</div>
@@ -675,7 +815,15 @@ function MiniMetric({ title, value, hint }: { title: string; value: string; hint
 
 function Feature({ title, desc, badge }: { title: string; desc: string; badge: string }) {
   return (
-    <div className="hover-lift" style={{ borderRadius: 18, border: "1px solid #1b2340", background: "linear-gradient(180deg, rgba(18,24,43,0.88), rgba(12,16,28,0.88))", padding: 16 }}>
+    <div
+      className="hover-lift"
+      style={{
+        borderRadius: 18,
+        border: "1px solid #1b2340",
+        background: "linear-gradient(180deg, rgba(18,24,43,0.88), rgba(12,16,28,0.88))",
+        padding: 16,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div style={{ fontWeight: 950 }}>{title}</div>
         <span
