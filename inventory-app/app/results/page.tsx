@@ -128,13 +128,29 @@ function percent(n: number): string {
 }
 
 /* =========================================================
-   Decision label + tones
+   Decision label + tones (more professional)
 ========================================================= */
 
 function decisionLabel(d: Decision): string {
   switch (d) {
     case "ORDER_NOW":
-      return "Order now";
+      return "Order";
+    case "WATCH":
+      return "Monitor";
+    case "REDUCE":
+      return "Reduce";
+    case "DEAD":
+      return "Dead stock";
+    case "HEALTHY":
+      return "Healthy";
+  }
+}
+
+function decisionShort(d: Decision): string {
+  // compact label for chips / KPIs
+  switch (d) {
+    case "ORDER_NOW":
+      return "Order";
     case "WATCH":
       return "Watch";
     case "REDUCE":
@@ -172,10 +188,16 @@ function chipTone(t?: EvidenceTone): { bg: string; border: string; color: string
 }
 
 /* =========================================================
-   Advice generation (THIS is the missing UX layer)
+   Advice generation (improved wording)
 ========================================================= */
 
-function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggestedOrder: number, daysCover: number): Advice {
+function buildAdvice(
+  line: LineOut,
+  th: Thresholds,
+  decision: Decision,
+  suggestedOrder: number,
+  daysCover: number
+): Advice {
   // confidence: based on activity + volatility
   const activity = line.activeDemandDays30;
   const cv = line.cv30;
@@ -183,27 +205,30 @@ function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggeste
     activity >= 10 && cv < 1.0 ? "High" : activity >= 5 ? "Medium" : "Low";
 
   const hasLoss = line.loss30 > 0;
-  const lossRate30 = (line.out30 + line.loss30) > 0 ? line.loss30 / (line.out30 + line.loss30) : 0;
+  const lossRate30 = line.out30 + line.loss30 > 0 ? line.loss30 / (line.out30 + line.loss30) : 0;
 
   const commonPro = [
-    "Auto-transfer suggestion before buying (across warehouses).",
+    "Transfer recommendation before buying (multi-location balancing).",
     "Supplier lead-time learning + reorder calendar.",
-    "Alerting: notify when SKU enters Order/Reduce bands.",
+    "Alerts: notify when a SKU enters Order/Reduce bands.",
   ];
 
   if (decision === "ORDER_NOW") {
     const bullets: string[] = [];
-    if (suggestedOrder > 0) bullets.push(`Place an order for ~${formatNum(suggestedOrder)} units (aiming for target stock).`);
-    else bullets.push("Review mapping/policy: suggested order = 0 but decision is urgent (check inputs).");
+    if (suggestedOrder > 0) {
+      bullets.push(`Release a PO for ~${formatNum(suggestedOrder)} units to reach the target position.`);
+    } else {
+      bullets.push("Signal is urgent but suggested qty is 0 — verify mapping and policy inputs.");
+    }
 
-    bullets.push(`Confirm lead time (${th.leadTimeDays}d) and safety buffer (${th.safetyDays}d) are realistic.`);
-    bullets.push("Validate today’s on-hand (cycle count / reconciliation) before sending PO.");
-    if (line.trend30vsPrev30 > 0.2) bullets.push("Demand is rising → consider ordering a bit earlier than usual.");
-    if (cv >= 1.2) bullets.push("High volatility → split the order into 2 drops if possible.");
+    bullets.push(`Confirm policy inputs: lead time (${th.leadTimeDays}d) and safety buffer (${th.safetyDays}d).`);
+    bullets.push("Validate on-hand (cycle count / reconciliation) before committing.");
+    if (line.trend30vsPrev30 > 0.2) bullets.push("Demand is accelerating → prioritize earlier placement.");
+    if (cv >= 1.2) bullets.push("High variability → consider split deliveries to reduce risk.");
     if (hasLoss) bullets.push(`Loss detected: ${formatNum(line.loss30)} (${percent(lossRate30)}) → investigate root cause.`);
 
     return {
-      headline: "Execute purchase now (prevent stockout).",
+      headline: "Immediate replenishment required (stockout risk).",
       bullets,
       nextReviewDays: Math.max(1, Math.round(th.leadTimeDays / 2) || 1),
       confidence: conf,
@@ -213,15 +238,15 @@ function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggeste
 
   if (decision === "WATCH") {
     const bullets: string[] = [];
-    bullets.push("Do NOT buy yet. Monitor consumption and receipts this week.");
-    bullets.push("If any upcoming demand spike is known (promotion/project), switch to Order now.");
-    bullets.push("Review supplier delivery reliability (late deliveries push you into stockout).");
-    if (cv >= 1.2) bullets.push("Volatility is high → shorten review cycle (check more frequently).");
-    if (line.trend30vsPrev30 > 0.2) bullets.push("Trend is up → you may cross ROP soon (pre-approve PO draft).");
-    if (hasLoss) bullets.push(`Loss signal exists (${percent(lossRate30)}) → don’t overreact by buying extra; fix loss first.`);
+    bullets.push("Hold purchase. Monitor consumption and receipts over the next cycle.");
+    bullets.push("If a known demand spike is expected, upgrade to Order immediately.");
+    bullets.push("Review supplier reliability—late deliveries increase stockout exposure.");
+    if (cv >= 1.2) bullets.push("High variability → shorten the review cycle.");
+    if (line.trend30vsPrev30 > 0.2) bullets.push("Demand trending up → prepare PO draft / pre-approval.");
+    if (hasLoss) bullets.push(`Loss signal present (${percent(lossRate30)}) → address loss drivers before over-ordering.`);
 
     return {
-      headline: "Monitor closely (near reorder band).",
+      headline: "Monitor closely (approaching reorder band).",
       bullets,
       nextReviewDays: 3,
       confidence: conf,
@@ -231,15 +256,15 @@ function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggeste
 
   if (decision === "REDUCE") {
     const bullets: string[] = [];
-    bullets.push("Stop/slow purchasing until cover returns to policy.");
-    bullets.push("Identify quick wins: bundle/discount, alternative channel, or internal consumption plan.");
-    bullets.push("Check if the SKU is duplicated across locations (possible consolidation).");
-    if (daysCover > th.overstockDays * 1.5) bullets.push("Cover is very high → consider liquidation path (strong action).");
-    if (line.out30 > 0) bullets.push("It still moves → reduce gradually, don’t dump instantly.");
-    if (hasLoss) bullets.push(`Loss exists (${percent(lossRate30)}) → overstock + loss is expensive; prioritize containment.`);
+    bullets.push("Pause or slow purchasing until cover returns within policy.");
+    bullets.push("Identify reduction path: alternative channel, internal consumption, or controlled markdown.");
+    bullets.push("Check for duplicated stock across locations (consolidation opportunity).");
+    if (daysCover > th.overstockDays * 1.5) bullets.push("Cover is materially above policy → escalate liquidation planning.");
+    if (line.out30 > 0) bullets.push("Demand exists → reduce gradually to protect service level.");
+    if (hasLoss) bullets.push(`Loss present (${percent(lossRate30)}) → overstock + loss compounds cost; prioritize containment.`);
 
     return {
-      headline: "Reduce inventory (cash is trapped).",
+      headline: "Reduce position (excess cover / cash trapped).",
       bullets,
       nextReviewDays: 7,
       confidence: conf,
@@ -254,13 +279,13 @@ function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggeste
   if (decision === "DEAD") {
     const bullets: string[] = [];
     bullets.push("Freeze purchasing immediately.");
-    bullets.push("Confirm if demand is truly zero (check substitutions / missing mapping).");
-    bullets.push("Decide disposal path: return to supplier, internal use, or liquidation.");
-    bullets.push("If it’s a new SKU, set a review window before labeling it dead.");
-    if (hasLoss) bullets.push("Loss signal exists → ensure losses are not misclassified as demand.");
+    bullets.push("Confirm the absence of demand (mapping gaps / substitutions can hide consumption).");
+    bullets.push("Select disposition path: supplier return, internal usage, liquidation, or write-off.");
+    bullets.push("If SKU is newly introduced, set a review window before classifying as dead.");
+    if (hasLoss) bullets.push("Loss signal present → ensure losses are not being misread as demand.");
 
     return {
-      headline: "Dead stock (no demand).",
+      headline: "Dead stock risk (no active demand).",
       bullets,
       nextReviewDays: 14,
       confidence: conf,
@@ -275,14 +300,14 @@ function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggeste
   // HEALTHY
   {
     const bullets: string[] = [];
-    bullets.push("No action needed. Keep policy thresholds stable.");
-    bullets.push("If you plan a demand change (seasonality), adjust lead/safety days temporarily.");
-    if (line.trend30vsPrev30 < -0.25) bullets.push("Trend down → watch for future overstock risk.");
-    if (cv >= 1.2) bullets.push("Volatile SKU → keep tighter monitoring even if healthy today.");
-    if (hasLoss) bullets.push(`Loss detected (${percent(lossRate30)}) → fix process; otherwise it will distort future decisions.`);
+    bullets.push("No action required. Maintain current policy thresholds.");
+    bullets.push("If seasonality or known demand shift is expected, adjust policy temporarily.");
+    if (line.trend30vsPrev30 < -0.25) bullets.push("Demand declining → monitor for emerging overstock risk.");
+    if (cv >= 1.2) bullets.push("High variability → keep tighter monitoring even if healthy today.");
+    if (hasLoss) bullets.push(`Loss detected (${percent(lossRate30)}) → fix process to avoid distorting future decisions.`);
 
     return {
-      headline: "Healthy position (stay the course).",
+      headline: "Healthy position (within policy).",
       bullets,
       nextReviewDays: 14,
       confidence: conf,
@@ -292,28 +317,36 @@ function buildAdvice(line: LineOut, th: Thresholds, decision: Decision, suggeste
 }
 
 /* =========================================================
-   Decision logic (stronger)
+   Decision logic (same math, better evidence wording)
 ========================================================= */
 
-function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "sku" | "warehouse" | "lastMoveISO" | "advice"> {
+function computeDecisionFromLine(
+  line: LineOut,
+  th: Thresholds
+): Omit<RowOut, "sku" | "warehouse" | "lastMoveISO" | "advice"> {
   const profile = line.profile;
 
   const avgCalendar = line.avgDailyOutCalendar30;
   const avgActive = line.avgDailyOutActive30;
 
   const chosenAvg =
-    profile === "INTERMITTENT" || profile === "LUMPY"
-      ? Math.max(avgCalendar, avgActive)
-      : avgCalendar;
+    profile === "INTERMITTENT" || profile === "LUMPY" ? Math.max(avgCalendar, avgActive) : avgCalendar;
 
   const cv = line.cv30;
   const volFactor =
-    profile === "LUMPY" ? 1.35 : profile === "INTERMITTENT" ? 1.2 : profile === "DECLINING" ? 0.95 : 1.0;
+    profile === "LUMPY"
+      ? 1.35
+      : profile === "INTERMITTENT"
+        ? 1.2
+        : profile === "DECLINING"
+          ? 0.95
+          : 1.0;
 
   const variabilityBump = 1 + Math.min(0.75, Math.max(0, cv)) * 0.35;
 
   const trend = line.trend30vsPrev30;
-  const trendFactor = trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
+  const trendFactor =
+    trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
 
   const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
 
@@ -327,7 +360,7 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
   const overstockDays = Math.max(1, th.overstockDays);
 
   const loss30 = line.loss30;
-  const lossRate30 = (line.out30 + loss30) > 0 ? loss30 / (line.out30 + loss30) : 0;
+  const lossRate30 = line.out30 + loss30 > 0 ? loss30 / (line.out30 + loss30) : 0;
 
   let decision: Decision = "HEALTHY";
 
@@ -368,8 +401,8 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
   });
 
   evidence.push({ k: "On hand", v: `${formatNum(onHand)}`, tone: onHand <= 0 ? "red" : "cyan" });
-  evidence.push({ k: "Out(30d)", v: `${formatNum(line.out30)}`, tone: "steel" });
-  evidence.push({ k: "Out(90d)", v: `${formatNum(line.out90)}`, tone: "steel" });
+  evidence.push({ k: "Out (30d)", v: `${formatNum(line.out30)}`, tone: "steel" });
+  evidence.push({ k: "Out (90d)", v: `${formatNum(line.out90)}`, tone: "steel" });
 
   evidence.push({
     k: "Avg/day",
@@ -396,7 +429,7 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
   });
 
   evidence.push({
-    k: "Volatility",
+    k: "Variability",
     v: `CV ${formatNum(cv)}`,
     tone: cv >= 1.2 ? "amber" : cv >= 0.7 ? "steel" : "green",
   });
@@ -407,8 +440,8 @@ function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "s
     tone: line.activeDemandDays30 <= 6 ? "amber" : "steel",
   });
 
-  if (loss30 > 0) evidence.push({ k: "Loss(30d)", v: `${formatNum(loss30)} (${percent(lossRate30)})`, tone: "amber" });
-  if (decision === "ORDER_NOW" && suggestedOrder > 0) evidence.push({ k: "Order", v: `${formatNum(suggestedOrder)} units`, tone: "red" });
+  if (loss30 > 0) evidence.push({ k: "Loss (30d)", v: `${formatNum(loss30)} (${percent(lossRate30)})`, tone: "amber" });
+  if (decision === "ORDER_NOW" && suggestedOrder > 0) evidence.push({ k: "Suggested", v: `${formatNum(suggestedOrder)} units`, tone: "red" });
 
   return {
     onHand,
@@ -461,7 +494,7 @@ export default function ResultsPage() {
   const [decisionFilter, setDecisionFilter] = useState<Decision | "ALL">("ALL");
   const [search, setSearch] = useState<string>("");
 
-  // UI states for better UX
+  // UI states
   const [openKey, setOpenKey] = useState<string | null>(null); // drawer
   const [expandedEvidence, setExpandedEvidence] = useState<Record<string, boolean>>({});
 
@@ -550,7 +583,6 @@ export default function ResultsPage() {
       p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
       small: { fontSize: 12, color: "#8f97ad", lineHeight: 1.55 } as CSSProperties,
 
-      grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 } as CSSProperties,
       grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 } as CSSProperties,
 
       statusRow: { marginTop: 12, color: "#aab1c4", fontSize: 13, display: "flex", gap: 12, flexWrap: "wrap" } as CSSProperties,
@@ -602,7 +634,6 @@ export default function ResultsPage() {
       kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
       kpiValue: { fontSize: 20, fontWeight: 950, marginTop: 6 } as CSSProperties,
 
-      // NEW: better table layout
       tableWrap: { marginTop: 14, overflowX: "auto" } as CSSProperties,
       table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 10px", minWidth: 1100 } as CSSProperties,
       thead: { position: "sticky", top: 0, zIndex: 2 } as CSSProperties,
@@ -634,7 +665,6 @@ export default function ResultsPage() {
         whiteSpace: "nowrap",
       } as CSSProperties,
 
-      // NEW: advice chip and button
       adviceBox: {
         border: "1px solid #202946",
         background: "rgba(20,27,48,0.45)",
@@ -645,7 +675,6 @@ export default function ResultsPage() {
       adviceTitle: { fontWeight: 950, color: "#e6e8ee", fontSize: 13 } as CSSProperties,
       adviceText: { marginTop: 6, color: "#b7bed1", fontSize: 12, lineHeight: 1.5 } as CSSProperties,
 
-      // Drawer
       overlay: {
         position: "fixed",
         inset: 0,
@@ -695,9 +724,9 @@ export default function ResultsPage() {
 
   const statusText = useMemo(() => {
     const parts: string[] = [];
-    parts.push(`Upload ${hasMovements ? "✓" : "×"}`);
+    parts.push(`Data ${hasMovements ? "✓" : "×"}`);
     parts.push(`Mapping ${hasMapping ? "✓" : "×"}`);
-    parts.push(`Type Values ${mvTypeValues ? "✓" : "×"}`);
+    parts.push(`Type values ${mvTypeValues ? "✓" : "×"}`);
     return parts.join(" • ");
   }, [hasMovements, hasMapping, mvTypeValues]);
 
@@ -765,7 +794,8 @@ export default function ResultsPage() {
     });
 
     out.sort((a, b) => {
-      const dRank = (x: Decision) => (x === "ORDER_NOW" ? 1 : x === "WATCH" ? 2 : x === "REDUCE" ? 3 : x === "DEAD" ? 4 : 5);
+      const dRank = (x: Decision) =>
+        x === "ORDER_NOW" ? 1 : x === "WATCH" ? 2 : x === "REDUCE" ? 3 : x === "DEAD" ? 4 : 5;
       const ra = dRank(a.decision);
       const rb = dRank(b.decision);
       if (ra !== rb) return ra - rb;
@@ -782,9 +812,9 @@ export default function ResultsPage() {
     };
 
     const playbook: string[] = [];
-    if (k.orderNow) playbook.push(`Approve urgent buys for ORDER_NOW lines (${k.orderNow}).`);
-    if (k.reduce) playbook.push(`Freeze purchasing on REDUCE lines (${k.reduce}) and plan clearance.`);
-    if (k.watch) playbook.push(`Set short review cycle for WATCH lines (${k.watch}) (e.g., every 3 days).`);
+    if (k.orderNow) playbook.push(`Authorize replenishment for critical lines (Order): ${k.orderNow}.`);
+    if (k.reduce) playbook.push(`Freeze purchasing for excess lines (Reduce): ${k.reduce}. Initiate reduction plan.`);
+    if (k.watch) playbook.push(`Set short review cadence for monitor lines: ${k.watch} (e.g., every 3 days).`);
 
     return { rowsOut: out, warehouses: whList, warnings: engine.warnings, kpis: k, topPlaybook: playbook };
   }, [movements, mappingV2, mvTypeValues, th]);
@@ -831,8 +861,8 @@ export default function ResultsPage() {
             <div style={styles.brand}>
               <div style={styles.logo} />
               <div>
-                <div style={styles.title}>Ops Control</div>
-                <div style={styles.subtitle}>Decisions + advice + evidence (V2)</div>
+                <div style={styles.title}>Inventory State • Ops Control</div>
+                <div style={styles.subtitle}>Policy-driven actions with evidence (V2)</div>
               </div>
             </div>
 
@@ -852,30 +882,33 @@ export default function ResultsPage() {
           {/* Hero */}
           <div className="anim-in anim-delay-2" style={styles.hero}>
             <span style={styles.pill}>⚡ Results</span>
-            <h1 style={styles.h1}>Decisions you can act on — with “what to do next”</h1>
+            <h1 style={styles.h1}>Inventory state intelligence — ranked actions with accountable rationale</h1>
             <p style={styles.p}>
-              This page turns your movements into a ranked action list, then adds an{" "}
-              <b style={{ color: "#e6e8ee" }}>Advice layer</b> per SKU (next steps + review cadence) + evidence chips.
+              This view classifies each line into an operational state (risk / excess / no-demand / healthy), then produces a{" "}
+              <b style={{ color: "#e6e8ee" }}>priority execution list</b>. Each action includes recommended next steps,
+              review cadence, and signal evidence.
             </p>
 
             {showMissing ? (
               <div style={{ marginTop: 12 }}>
-                <div style={{ ...styles.p, marginTop: 6 }}>Missing demo data. Start from Upload → Mapping → Movement Types.</div>
+                <div style={{ ...styles.p, marginTop: 6 }}>
+                  Workflow not ready. Complete: Upload → Mapping → Movement Types to generate decisions.
+                </div>
                 <div style={styles.row}>
-                  <span style={styles.badgeBad}>Status: {statusText}</span>
+                  <span style={styles.badgeBad}>Workflow readiness: {statusText}</span>
                 </div>
                 <div style={{ ...styles.small, marginTop: 8 }}>
-                  Mapping must include: <b>itemId</b>, <b>date</b>, <b>qty</b>, <b>movementType</b> (warehouse optional).
+                  Required mapping fields: <b>itemId</b>, <b>date</b>, <b>qty</b>, <b>movementType</b> (warehouse optional).
                 </div>
               </div>
             ) : (
               <div style={{ marginTop: 12 }}>
                 <div style={styles.statusRow}>
-                  <span style={styles.badgeOk}>Status: {statusText}</span>
+                  <span style={styles.badgeOk}>Workflow readiness: {statusText}</span>
                   {warnings?.length ? (
                     <span style={{ ...styles.small, color: "#ffe9b3" }}>⚠ {warnings.slice(0, 2).join(" • ")}</span>
                   ) : (
-                    <span style={styles.small}>Engine OK • Advice layer enabled</span>
+                    <span style={styles.small}>Engine OK • Evidence + advice enabled</span>
                   )}
                 </div>
 
@@ -886,11 +919,11 @@ export default function ResultsPage() {
                     <div style={styles.kpiValue}>{kpis.skuCount}</div>
                   </div>
                   <div style={styles.kpi}>
-                    <div style={styles.kpiTitle}>Order now</div>
+                    <div style={styles.kpiTitle}>Order</div>
                     <div style={styles.kpiValue}>{kpis.orderNow}</div>
                   </div>
                   <div style={styles.kpi}>
-                    <div style={styles.kpiTitle}>Watch</div>
+                    <div style={styles.kpiTitle}>Monitor</div>
                     <div style={styles.kpiValue}>{kpis.watch}</div>
                   </div>
                   <div style={styles.kpi}>
@@ -899,10 +932,10 @@ export default function ResultsPage() {
                   </div>
                 </div>
 
-                {/* NEW: Playbook summary */}
+                {/* Summary blocks */}
                 <div style={styles.grid3}>
                   <div style={styles.cardPad}>
-                    <div style={{ fontWeight: 950, fontSize: 16 }}>Today’s playbook</div>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>Execution playbook (today)</div>
                     <div style={{ ...styles.small, marginTop: 8 }}>
                       {topPlaybook.length ? (
                         <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, color: "#c8cee0" }}>
@@ -911,25 +944,40 @@ export default function ResultsPage() {
                           ))}
                         </ul>
                       ) : (
-                        "No urgent actions. Review healthy lines weekly."
+                        "No urgent actions detected. Maintain routine review cadence."
                       )}
                     </div>
                   </div>
 
                   <div style={styles.cardPad}>
-                    <div style={{ fontWeight: 950, fontSize: 16 }}>Policy thresholds</div>
+                    <div style={{ fontWeight: 950, fontSize: 16 }}>Policy controls</div>
                     <div style={{ ...styles.small, marginTop: 6 }}>
-                      You control these — no random assumptions. Overstock default = <b>90</b>.
+                      You control thresholds explicitly. The engine applies them consistently (no hidden assumptions).
                     </div>
 
                     <div style={styles.row}>
-                      <button className="btn-glow" type="button" style={preset === "CONSERVATIVE" ? styles.btnPrimary : styles.btnGhost} onClick={() => applyPreset("CONSERVATIVE")}>
+                      <button
+                        className="btn-glow"
+                        type="button"
+                        style={preset === "CONSERVATIVE" ? styles.btnPrimary : styles.btnGhost}
+                        onClick={() => applyPreset("CONSERVATIVE")}
+                      >
                         Conservative
                       </button>
-                      <button className="btn-glow" type="button" style={preset === "BALANCED" ? styles.btnPrimary : styles.btnGhost} onClick={() => applyPreset("BALANCED")}>
+                      <button
+                        className="btn-glow"
+                        type="button"
+                        style={preset === "BALANCED" ? styles.btnPrimary : styles.btnGhost}
+                        onClick={() => applyPreset("BALANCED")}
+                      >
                         Balanced
                       </button>
-                      <button className="btn-glow" type="button" style={preset === "AGGRESSIVE" ? styles.btnPrimary : styles.btnGhost} onClick={() => applyPreset("AGGRESSIVE")}>
+                      <button
+                        className="btn-glow"
+                        type="button"
+                        style={preset === "AGGRESSIVE" ? styles.btnPrimary : styles.btnGhost}
+                        onClick={() => applyPreset("AGGRESSIVE")}
+                      >
                         Aggressive
                       </button>
                       <span style={styles.small}>
@@ -939,28 +987,51 @@ export default function ResultsPage() {
 
                     <div style={styles.controlGrid}>
                       <div style={styles.field}>
-                        <div style={styles.label}>Lead time days</div>
-                        <input style={styles.input} type="number" value={leadTimeDays} min={0} max={365} onChange={(e) => setLeadTimeDays(clampInt(Number(e.target.value), 0, 365))} />
-                        <div style={styles.small}>Used in reorder point.</div>
+                        <div style={styles.label}>Lead time (days)</div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          value={leadTimeDays}
+                          min={0}
+                          max={365}
+                          onChange={(e) => setLeadTimeDays(clampInt(Number(e.target.value), 0, 365))}
+                        />
+                        <div style={styles.small}>Used to define reorder exposure window.</div>
                       </div>
 
                       <div style={styles.field}>
-                        <div style={styles.label}>Safety days</div>
-                        <input style={styles.input} type="number" value={safetyDays} min={0} max={365} onChange={(e) => setSafetyDays(clampInt(Number(e.target.value), 0, 365))} />
-                        <div style={styles.small}>Buffer against variability.</div>
+                        <div style={styles.label}>Safety buffer (days)</div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          value={safetyDays}
+                          min={0}
+                          max={365}
+                          onChange={(e) => setSafetyDays(clampInt(Number(e.target.value), 0, 365))}
+                        />
+                        <div style={styles.small}>Buffers demand variability.</div>
                       </div>
 
                       <div style={styles.field}>
-                        <div style={styles.label}>Overstock policy (days)</div>
-                        <input style={styles.input} type="number" value={overstockDays} min={1} max={3650} onChange={(e) => setOverstockDays(clampInt(Number(e.target.value), 1, 3650))} />
-                        <div style={styles.small}>Above this cover → Reduce.</div>
+                        <div style={styles.label}>Overstock policy (days of cover)</div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          value={overstockDays}
+                          min={1}
+                          max={3650}
+                          onChange={(e) => setOverstockDays(clampInt(Number(e.target.value), 1, 3650))}
+                        />
+                        <div style={styles.small}>Above this cover ⇒ Reduce action.</div>
                       </div>
                     </div>
                   </div>
 
                   <div style={styles.cardPad}>
                     <div style={{ fontWeight: 950, fontSize: 16 }}>Filters</div>
-                    <div style={{ ...styles.small, marginTop: 6 }}>Narrow down to warehouse / decision / SKU search.</div>
+                    <div style={{ ...styles.small, marginTop: 6 }}>
+                      Focus by warehouse, action type, or SKU to execute faster.
+                    </div>
 
                     <div style={styles.controlGrid}>
                       <div style={styles.field}>
@@ -972,31 +1043,36 @@ export default function ResultsPage() {
                             </option>
                           ))}
                         </select>
-                        <div style={styles.small}>Warehouse is optional in mapping.</div>
+                        <div style={styles.small}>Warehouse mapping is optional.</div>
                       </div>
 
                       <div style={styles.field}>
-                        <div style={styles.label}>Decision</div>
+                        <div style={styles.label}>Action</div>
                         <select style={styles.input} value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as any)}>
                           <option value="ALL">ALL</option>
-                          <option value="ORDER_NOW">ORDER_NOW</option>
-                          <option value="WATCH">WATCH</option>
+                          <option value="ORDER_NOW">ORDER</option>
+                          <option value="WATCH">MONITOR</option>
                           <option value="REDUCE">REDUCE</option>
                           <option value="DEAD">DEAD</option>
                           <option value="HEALTHY">HEALTHY</option>
                         </select>
-                        <div style={styles.small}>Urgent signals first.</div>
+                        <div style={styles.small}>Priority: Order → Monitor → Reduce → Dead → Healthy.</div>
                       </div>
 
                       <div style={styles.field}>
                         <div style={styles.label}>Search</div>
-                        <input style={styles.input} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="SKU / Warehouse..." />
+                        <input
+                          style={styles.input}
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder="Search SKU / Warehouse…"
+                        />
                         <div style={styles.small}>Case-insensitive contains.</div>
                       </div>
                     </div>
 
                     <div style={{ ...styles.small, marginTop: 10 }}>
-                      Showing: <b style={{ color: "#e6e8ee" }}>{filtered.length}</b> rows
+                      Rows shown: <b style={{ color: "#e6e8ee" }}>{filtered.length}</b>
                     </div>
                   </div>
                 </div>
@@ -1006,15 +1082,15 @@ export default function ResultsPage() {
                   <table style={styles.table}>
                     <thead style={styles.thead as any}>
                       <tr>
-                        <th style={styles.th}>Decision</th>
+                        <th style={styles.th}>Action</th>
                         <th style={styles.th}>SKU</th>
                         <th style={styles.th}>WH</th>
                         <th style={styles.th}>On hand</th>
-                        <th style={styles.th}>Out(30d)</th>
+                        <th style={styles.th}>Out (30d)</th>
                         <th style={styles.th}>Cover</th>
                         <th style={styles.th}>ROP</th>
                         <th style={styles.th}>Suggested</th>
-                        <th style={styles.th}>Advice</th>
+                        <th style={styles.th}>Next steps</th>
                         <th style={styles.th}>Evidence</th>
                       </tr>
                     </thead>
@@ -1038,7 +1114,7 @@ export default function ResultsPage() {
                                   color: tone.color,
                                 }}
                               >
-                                {decisionLabel(r.decision)} • {r.severity}
+                                {decisionShort(r.decision)} • {r.severity}
                               </span>
 
                               <div style={{ marginTop: 10 }}>
@@ -1055,7 +1131,7 @@ export default function ResultsPage() {
 
                             <td style={styles.td}>
                               <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{r.sku}</div>
-                              <div style={styles.small}>{r.lastMoveISO ? `Last move: ${r.lastMoveISO}` : "Last move: —"}</div>
+                              <div style={styles.small}>{r.lastMoveISO ? `Last activity: ${r.lastMoveISO}` : "Last activity: —"}</div>
                             </td>
 
                             <td style={styles.td}>
@@ -1072,7 +1148,7 @@ export default function ResultsPage() {
                               <div style={styles.small}>Target: {formatNum(r.targetStock)}</div>
                             </td>
 
-                            {/* NEW: Advice column */}
+                            {/* Advice column */}
                             <td style={styles.td}>
                               <div style={styles.adviceBox}>
                                 <div style={styles.adviceTitle}>{r.advice.headline}</div>
@@ -1080,13 +1156,13 @@ export default function ResultsPage() {
                                   • {r.advice.bullets[0] ?? "—"}
                                   <br />
                                   <span style={{ color: "#8f97ad" }}>
-                                    Next review: {r.advice.nextReviewDays}d • Confidence: {r.advice.confidence}
+                                    Review: {r.advice.nextReviewDays}d • Confidence: {r.advice.confidence}
                                   </span>
                                 </div>
 
                                 {!isPro && r.advice.proLockedBullets?.length ? (
                                   <div style={{ marginTop: 8, ...styles.small, color: "#e6dcff" }}>
-                                    🔒 Pro adds deeper playbook (transfer/alerts/what-if)
+                                    🔒 Pro adds: transfers, alerts, what-if guidance
                                   </div>
                                 ) : null}
                               </div>
@@ -1130,14 +1206,14 @@ export default function ResultsPage() {
                   </table>
 
                   <div style={{ ...styles.small, marginTop: 10 }}>
-                    Note: Showing max 250 rows for speed. Priority: Order Now → Watch → Reduce → Dead → Healthy.
+                    Performance note: results are capped to 250 rows for demo speed. Sorting is governed by action priority and severity.
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Drawer / Modal (Details + Advice + Pro tease) */}
+          {/* Drawer / Modal */}
           {opened ? (
             <div style={styles.overlay} onClick={() => setOpenKey(null)}>
               <div style={styles.drawer} onClick={(e) => e.stopPropagation()}>
@@ -1148,7 +1224,7 @@ export default function ResultsPage() {
                     </div>
                     <div style={{ marginTop: 6, color: "#b7bed1", lineHeight: 1.6 }}>
                       <b style={{ color: "#e6e8ee" }}>{decisionLabel(opened.decision)}</b> • severity {opened.severity} •{" "}
-                      {opened.lastMoveISO ? `Last move ${opened.lastMoveISO}` : "Last move —"}
+                      {opened.lastMoveISO ? `Last activity ${opened.lastMoveISO}` : "Last activity —"}
                     </div>
                   </div>
 
@@ -1160,7 +1236,7 @@ export default function ResultsPage() {
                 <div style={styles.drawerBody}>
                   <div style={styles.split} className="drawer-split">
                     <div style={{ ...styles.cardPad }}>
-                      <div style={{ fontWeight: 950 }}>Key numbers</div>
+                      <div style={{ fontWeight: 950 }}>Key metrics</div>
                       <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                         <KV k="On hand" v={formatNum(opened.onHand)} />
                         <KV k="Out (30d)" v={formatNum(opened.out30d)} />
@@ -1173,12 +1249,12 @@ export default function ResultsPage() {
                       </div>
 
                       <div style={{ marginTop: 12, ...styles.small }}>
-                        Confidence is based on active demand days + volatility. It helps you know how much to trust the signal.
+                        Confidence reflects signal reliability (activity + variability). Use it to calibrate urgency and review cadence.
                       </div>
                     </div>
 
                     <div style={{ ...styles.cardPad }}>
-                      <div style={{ fontWeight: 950 }}>What to do next</div>
+                      <div style={{ fontWeight: 950 }}>Recommended next steps</div>
                       <div style={{ marginTop: 10, color: "#b7bed1", lineHeight: 1.7 }}>
                         <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{opened.advice.headline}</div>
                         <ul style={{ margin: "10px 0 0", paddingLeft: 18 }}>
@@ -1233,7 +1309,7 @@ export default function ResultsPage() {
                   </div>
 
                   <div style={{ marginTop: 12, ...styles.small }}>
-                    Tip: If warehouse isn’t mapped, all lines show under a default warehouse. That’s allowed.
+                    Note: If warehouse is not mapped, all lines are evaluated under a default warehouse (supported).
                   </div>
                 </div>
               </div>
