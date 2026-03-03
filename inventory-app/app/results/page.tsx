@@ -3,18 +3,18 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
+
 import {
   loadDatasetV2,
   loadMappingV2,
   loadMovementTypeValueMappingV2WithDefault,
-  toNumber,
-  type DemoRow,
   type MovementsMapping,
-  type MovementTypeValueMapping,
 } from "@/lib/demoStore";
 
+import { runEngineV2, getDefaultEngineParams, type LineOut } from "@/lib/engineV2";
+
 /* =========================================================
-   Types
+   Types (UI)
 ========================================================= */
 
 type Decision = "ORDER_NOW" | "WATCH" | "REDUCE" | "DEAD" | "HEALTHY";
@@ -22,16 +22,23 @@ type Decision = "ORDER_NOW" | "WATCH" | "REDUCE" | "DEAD" | "HEALTHY";
 type Thresholds = {
   leadTimeDays: number; // user-defined
   safetyDays: number; // user-defined
-  overstockDays: number; // user-defined
+  overstockDays: number; // user-defined (default 90)
 };
+
+type EvidenceTone = "cyan" | "amber" | "green" | "red" | "violet" | "steel";
+
+type EvidenceChip = { k: string; v: string; tone?: EvidenceTone };
 
 type RowOut = {
   sku: string;
   warehouse: string;
 
   onHand: number;
-  out30d: number; // total OUT in last 30d
-  avgDailyOut: number;
+
+  out30d: number;
+  out90d: number;
+
+  avgDailyOut: number; // the chosen avg used for policy (calendar or active)
   daysCover: number;
 
   reorderPoint: number;
@@ -42,10 +49,17 @@ type RowOut = {
   severity: number; // 0..100
 
   lastMoveISO: string | null;
-  evidence: Array<{ k: string; v: string; tone?: "cyan" | "amber" | "green" | "red" | "violet" | "steel" }>;
-};
 
-type StockKey = string; // `${sku}||${wh}`
+  evidence: EvidenceChip[];
+
+  // extra “pro-ish” signals (still shown in evidence)
+  profile: string;
+  trend: number;
+  cv30: number;
+  activeDays30: number;
+  loss30: number;
+  lossRate30: number;
+};
 
 /* =========================================================
    Threshold storage (localStorage) - isolated for Results
@@ -62,7 +76,7 @@ function normalizeThresholds(t?: Partial<Thresholds> | null): Thresholds {
   return {
     leadTimeDays: clampInt(Number(t?.leadTimeDays ?? 7), 0, 365),
     safetyDays: clampInt(Number(t?.safetyDays ?? 7), 0, 365),
-    overstockDays: clampInt(Number(t?.overstockDays ?? 90), 1, 3650),
+    overstockDays: clampInt(Number(t?.overstockDays ?? 90), 1, 3650), // ✅ default 90
   };
 }
 
@@ -87,32 +101,21 @@ function saveThresholdsLocal(t: Thresholds) {
 }
 
 /* =========================================================
-   Helpers
+   Formatting + UI helpers
 ========================================================= */
-
-function normToken(x: string): string {
-  return (x ?? "").toString().trim().toLowerCase();
-}
-
-function parseDateISOish(x: string): number | null {
-  const s = (x ?? "").toString().trim();
-  if (!s) return null;
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : null;
-}
-
-function daysBetween(msA: number, msB: number): number {
-  const d = Math.floor((msB - msA) / (1000 * 60 * 60 * 24));
-  return d;
-}
 
 function formatNum(n: number): string {
   if (!Number.isFinite(n)) return "0";
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${Math.round(n / 1000) / 1000}M`;
+  if (abs >= 1_000_000) return `${Math.round((n / 1_000_000) * 100) / 100}M`;
   if (abs >= 10_000) return `${Math.round(n)}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const rounded = Math.round(n * 100) / 100;
   return `${rounded}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function percent(n: number): string {
+  if (!Number.isFinite(n)) return "0%";
+  return `${Math.round(n * 1000) / 10}%`;
 }
 
 function decisionLabel(d: Decision): string {
@@ -145,8 +148,8 @@ function decisionTone(d: Decision): { bg: string; border: string; color: string 
   }
 }
 
-function chipTone(t?: string): { bg: string; border: string; color: string } {
-  const tone = (t ?? "steel") as any;
+function chipTone(t?: EvidenceTone): { bg: string; border: string; color: string } {
+  const tone = (t ?? "steel") as EvidenceTone;
   if (tone === "red") return { bg: "rgba(255,80,80,0.10)", border: "rgba(255,80,80,0.30)", color: "#ffd4d4" };
   if (tone === "amber") return { bg: "rgba(255,196,0,0.10)", border: "rgba(255,196,0,0.25)", color: "#ffe9b3" };
   if (tone === "green") return { bg: "rgba(80,255,170,0.08)", border: "rgba(80,255,170,0.20)", color: "#c8ffe9" };
@@ -155,19 +158,181 @@ function chipTone(t?: string): { bg: string; border: string; color: string } {
   return { bg: "rgba(160,174,192,0.10)", border: "rgba(160,174,192,0.22)", color: "#d7dce6" };
 }
 
-function classifyMovement(
-  rawType: string,
-  mv: MovementTypeValueMapping
-): "IN" | "OUT" | "OTHER" {
-  const t = normToken(rawType);
-  if (!t) return "OTHER";
+/* =========================================================
+   Decision logic (stronger + manufacturing-aware)
+   - Uses engine signals (profile/trend/volatility/active days/loss)
+========================================================= */
 
-  const inSet = new Set((mv?.inValues ?? []).map(normToken));
-  const outSet = new Set((mv?.outValues ?? []).map(normToken));
+function computeDecisionFromLine(line: LineOut, th: Thresholds): Omit<RowOut, "sku" | "warehouse" | "lastMoveISO"> {
+  // Choose avg demand:
+  // - STABLE: calendar avg is fine
+  // - INTERMITTENT/LUMPY: active-day avg reflects real issue days better
+  // - DECLINING/NEW: stay conservative but don’t explode
+  const profile = line.profile;
 
-  if (inSet.has(t)) return "IN";
-  if (outSet.has(t)) return "OUT";
-  return "OTHER";
+  const avgCalendar = line.avgDailyOutCalendar30;
+  const avgActive = line.avgDailyOutActive30;
+
+  const chosenAvg =
+    profile === "INTERMITTENT" || profile === "LUMPY"
+      ? Math.max(avgCalendar, avgActive) // don’t understate
+      : avgCalendar;
+
+  // Volatility buffer (simple but real):
+  // cv30 ~ 0.0 stable, >1 very volatile
+  const cv = line.cv30;
+  const volFactor =
+    profile === "LUMPY" ? 1.35 : profile === "INTERMITTENT" ? 1.2 : profile === "DECLINING" ? 0.95 : 1.0;
+
+  const variabilityBump = 1 + Math.min(0.75, Math.max(0, cv)) * 0.35; // small controlled bump
+
+  // Trend bump:
+  // trend is [-1..+1] where + means growing demand.
+  // If rising, raise buffers; if declining, reduce slightly.
+  const trend = line.trend30vsPrev30;
+  const trendFactor = trend > 0 ? 1 + Math.min(0.4, trend) * 0.25 : 1 + Math.max(-0.3, trend) * 0.15;
+
+  const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
+
+  // Reorder Point = avg * horizon * (volFactor * variabilityBump * trendFactor)
+  const reorderPoint = chosenAvg * reviewHorizon * volFactor * variabilityBump * trendFactor;
+
+  // Target Stock: slightly above ROP (ops-friendly)
+  const targetStock = reorderPoint * 1.15;
+
+  const onHand = line.onHand;
+
+  const suggestedOrder = Math.max(0, Math.ceil(targetStock - onHand));
+
+  const daysCover =
+    chosenAvg > 0 ? onHand / chosenAvg : onHand > 0 ? 9999 : 0;
+
+  const overstockDays = Math.max(1, th.overstockDays);
+
+  // Manufacturing “loss” signal
+  const loss30 = line.loss30;
+  const lossRate30 = (line.out30 + loss30) > 0 ? loss30 / (line.out30 + loss30) : 0;
+
+  // Decision rules (priority):
+  // 1) ORDER_NOW: below ROP with demand, OR negative onHand
+  // 2) WATCH: near ROP band
+  // 3) REDUCE: too much cover vs policy (or dead stock)
+  // 4) DEAD: no demand but stock exists
+  // 5) HEALTHY
+  let decision: Decision = "HEALTHY";
+
+  const hasDemand = line.out30 > 0 || chosenAvg > 0;
+
+  if (onHand < 0) decision = "ORDER_NOW";
+
+  if (hasDemand && onHand <= reorderPoint) decision = "ORDER_NOW";
+
+  if (hasDemand && onHand > reorderPoint && onHand <= reorderPoint * 1.25) decision = "WATCH";
+
+  // dead stock / no demand
+  if (!hasDemand && onHand > 0) decision = "DEAD";
+
+  // reduce when overstock cover too high (even if demand exists)
+  if (chosenAvg > 0 && daysCover >= overstockDays) decision = "REDUCE";
+  if (!hasDemand && onHand > 0 && daysCover >= overstockDays) decision = "REDUCE";
+
+  // Severity
+  let severity = 18;
+
+  if (decision === "ORDER_NOW") {
+    const gap = reorderPoint - onHand;
+    const denom = Math.max(1, reorderPoint);
+    severity = clampInt((gap / denom) * 100, 60, 100);
+    if (onHand < 0) severity = 100;
+  } else if (decision === "WATCH") {
+    severity = 45;
+  } else if (decision === "REDUCE") {
+    severity = clampInt(((daysCover - overstockDays) / Math.max(1, overstockDays)) * 100, 40, 85);
+  } else if (decision === "DEAD") {
+    severity = 35;
+  } else {
+    severity = 18;
+  }
+
+  // Evidence chips
+  const evidence: EvidenceChip[] = [];
+
+  evidence.push({ k: "Profile", v: profile, tone: profile === "LUMPY" ? "amber" : profile === "DECLINING" ? "steel" : "green" });
+
+  evidence.push({ k: "On hand", v: `${formatNum(onHand)}`, tone: onHand <= 0 ? "red" : "cyan" });
+
+  evidence.push({ k: "Out(30d)", v: `${formatNum(line.out30)}`, tone: "steel" });
+  evidence.push({ k: "Out(90d)", v: `${formatNum(line.out90)}`, tone: "steel" });
+
+  evidence.push({
+    k: "Avg/day",
+    v: `${formatNum(chosenAvg)}`,
+    tone: (profile === "INTERMITTENT" || profile === "LUMPY") ? "amber" : "steel",
+  });
+
+  evidence.push({
+    k: "Cover",
+    v: daysCover >= 9999 ? "∞" : `${formatNum(daysCover)} d`,
+    tone: decision === "REDUCE" ? "violet" : decision === "ORDER_NOW" ? "red" : "green",
+  });
+
+  evidence.push({
+    k: "ROP",
+    v: `${formatNum(reorderPoint)}`,
+    tone: decision === "ORDER_NOW" ? "red" : "amber",
+  });
+
+  evidence.push({
+    k: "Trend",
+    v: trend >= 0 ? `+${formatNum(trend)}` : `${formatNum(trend)}`,
+    tone: trend > 0.25 ? "amber" : trend < -0.25 ? "steel" : "green",
+  });
+
+  evidence.push({
+    k: "Volatility",
+    v: `CV ${formatNum(cv)}`,
+    tone: cv >= 1.2 ? "amber" : cv >= 0.7 ? "steel" : "green",
+  });
+
+  evidence.push({
+    k: "Active days",
+    v: `${line.activeDemandDays30}/30`,
+    tone: line.activeDemandDays30 <= 6 ? "amber" : "steel",
+  });
+
+  if (loss30 > 0) {
+    evidence.push({ k: "Loss(30d)", v: `${formatNum(loss30)} (${percent(lossRate30)})`, tone: "amber" });
+  }
+
+  // Suggested order shown separately, but still add a chip when urgent
+  if (decision === "ORDER_NOW" && suggestedOrder > 0) {
+    evidence.push({ k: "Order", v: `${formatNum(suggestedOrder)} units`, tone: "red" });
+  }
+
+  return {
+    onHand,
+    out30d: line.out30,
+    out90d: line.out90,
+
+    avgDailyOut: chosenAvg,
+    daysCover,
+
+    reorderPoint,
+    targetStock,
+    suggestedOrder,
+
+    decision,
+    severity,
+
+    evidence,
+
+    profile,
+    trend,
+    cv30: cv,
+    activeDays30: line.activeDemandDays30,
+    loss30,
+    lossRate30,
+  };
 }
 
 /* =========================================================
@@ -178,7 +343,7 @@ export default function ResultsPage() {
   const router = useRouter();
 
   const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
-  const mappingV2 = typeof window !== "undefined" ? loadMappingV2() : null;
+  const mappingV2: MovementsMapping | null = typeof window !== "undefined" ? loadMappingV2() : null;
   const mvTypeValues =
     typeof window !== "undefined" ? loadMovementTypeValueMappingV2WithDefault() : null;
 
@@ -355,6 +520,8 @@ export default function ResultsPage() {
   const hasMapping =
     !!mappingV2?.itemId && !!mappingV2?.date && !!mappingV2?.qty && !!mappingV2?.movementType;
 
+  const showMissing = !hasMovements || !hasMapping || !mvTypeValues;
+
   const statusText = useMemo(() => {
     const parts: string[] = [];
     parts.push(`Upload ${hasMovements ? "✓" : "×"}`);
@@ -363,195 +530,68 @@ export default function ResultsPage() {
     return parts.join(" • ");
   }, [hasMovements, hasMapping, mvTypeValues]);
 
-  const { rowsOut, warehouses, kpis } = useMemo(() => {
+  const th = useMemo(
+    () => normalizeThresholds({ leadTimeDays, safetyDays, overstockDays }),
+    [leadTimeDays, safetyDays, overstockDays]
+  );
+
+  const { rowsOut, warehouses, kpis, warnings } = useMemo(() => {
     const empty = {
       rowsOut: [] as RowOut[],
       warehouses: ["ALL"] as string[],
-      kpis: {
-        skuCount: 0,
-        orderNow: 0,
-        watch: 0,
-        reduce: 0,
+      warnings: [] as string[],
+      kpis: { skuCount: 0, orderNow: 0, watch: 0, reduce: 0 },
+    };
+
+    if (!movements || !mappingV2 || !mvTypeValues) return empty;
+
+    const engine = runEngineV2({
+      movements: { headers: movements.headers, rows: movements.rows },
+      mapping: mappingV2,
+      mvTypes: mvTypeValues,
+      params: {
+        ...getDefaultEngineParams(),
+        // manufacturing-friendly defaults:
+        w90: 90,
+        // loss tokens can be expanded later in PRO via UI:
+        lossTokens: ["scrap", "waste", "reject", "quality", "damage", "loss"],
       },
-    };
+    });
 
-    if (!hasMovements || !hasMapping || !movements || !mappingV2 || !mvTypeValues) return empty;
-
-    const tNow = Date.now();
-    const t30 = tNow - 30 * 24 * 60 * 60 * 1000;
-
-    const whCol = mappingV2.warehouse;
-    const skuCol = mappingV2.itemId;
-    const dtCol = mappingV2.date;
-    const qtyCol = mappingV2.qty;
-    const mtCol = mappingV2.movementType;
-
-    // collect warehouses
-    const whSet = new Set<string>();
-    whSet.add("ALL");
-
-    // aggregate movements into per sku||wh
-    type Agg = {
-      onHand: number;
-      out30d: number;
-      lastMove: number | null;
-      hasAny: boolean;
-    };
-
-    const map = new Map<StockKey, Agg>();
-
-    function getKey(sku: string, wh: string) {
-      return `${sku}||${wh}`;
+    if (!engine.ok) {
+      return {
+        ...empty,
+        warnings: engine.errors.length ? engine.errors : engine.warnings,
+      };
     }
 
-    for (const r of movements.rows as DemoRow[]) {
-      const sku = (r[skuCol] ?? "").toString().trim();
-      if (!sku) continue;
+    const out: RowOut[] = engine.lines.map((ln: LineOut) => {
+      const core = computeDecisionFromLine(ln, th);
 
-      const wh = (whCol ? (r[whCol] ?? "").toString().trim() : "") || "ALL";
-      if (wh && wh !== "ALL") whSet.add(wh);
-
-      const dt = (r[dtCol] ?? "").toString().trim();
-      const t = parseDateISOish(dt);
-
-      const qtyRaw = (r[qtyCol] ?? "").toString();
-      const qty = toNumber(qtyRaw);
-
-      const mt = (r[mtCol] ?? "").toString().trim();
-      const cls = classifyMovement(mt, mvTypeValues);
-
-      const key = getKey(sku, wh);
-      const a = map.get(key) ?? { onHand: 0, out30d: 0, lastMove: null, hasAny: false };
-
-      // Stock logic (simple, robust):
-      // IN adds, OUT subtracts, OTHER ignored for net stock (safe demo behavior)
-      if (cls === "IN") a.onHand += Math.abs(qty);
-      if (cls === "OUT") a.onHand -= Math.abs(qty);
-
-      // consumption 30d: sum OUT abs qty by date
-      if (cls === "OUT" && t !== null && t >= t30) {
-        a.out30d += Math.abs(qty);
-      }
-
-      // last move
-      if (t !== null) {
-        a.lastMove = a.lastMove === null ? t : Math.max(a.lastMove, t);
-      }
-
-      a.hasAny = true;
-      map.set(key, a);
-    }
-
-    const th = normalizeThresholds({ leadTimeDays, safetyDays, overstockDays });
-    const reviewHorizon = Math.max(1, th.leadTimeDays + th.safetyDays);
-    const overstockDaysN = Math.max(1, th.overstockDays);
-
-    const out: RowOut[] = [];
-
-    for (const [key, a] of map.entries()) {
-      if (!a.hasAny) continue;
-
-      const [sku, wh] = key.split("||");
-      const onHand = a.onHand;
-
-      const avgDailyOut = a.out30d / 30;
-      const daysCover = avgDailyOut > 0 ? onHand / avgDailyOut : onHand > 0 ? 9999 : 0;
-
-      const reorderPoint = avgDailyOut * reviewHorizon;
-      const targetStock = avgDailyOut * (reviewHorizon + 7); // small buffer beyond ROP
-      const suggestedOrder = Math.max(0, Math.ceil(targetStock - onHand));
-
-      // decision rules (simple but “ops-real”)
-      let decision: Decision = "HEALTHY";
-
-      // DEAD: no consumption in 30d + stock sitting
-      if (avgDailyOut === 0 && onHand > 0) decision = "DEAD";
-
-      // ORDER_NOW: below reorder point OR negative/zero stock with demand
-      if (avgDailyOut > 0 && onHand <= reorderPoint) decision = "ORDER_NOW";
-
-      // WATCH: close to reorder point band
-      if (avgDailyOut > 0 && onHand > reorderPoint && onHand <= reorderPoint * 1.35) decision = "WATCH";
-
-      // REDUCE: too much cover vs policy
-      if (avgDailyOut > 0 && daysCover >= overstockDaysN) decision = "REDUCE";
-      if (avgDailyOut === 0 && onHand > 0 && daysCover >= overstockDaysN) decision = "REDUCE"; // sitting stock
-
-      // HEALTHY fallback:
-      if (onHand <= 0 && avgDailyOut === 0) decision = "HEALTHY";
-
-      // severity 0..100
-      let severity = 20;
-      if (decision === "ORDER_NOW") {
-        // deeper below ROP => higher severity
-        const gap = reorderPoint - onHand;
-        const denom = Math.max(1, reorderPoint);
-        severity = clampInt((gap / denom) * 100, 55, 100);
-      } else if (decision === "WATCH") {
-        severity = 45;
-      } else if (decision === "REDUCE") {
-        severity = clampInt(((daysCover - overstockDaysN) / Math.max(1, overstockDaysN)) * 100, 40, 85);
-      } else if (decision === "DEAD") {
-        severity = 35;
-      } else {
-        severity = 18;
-      }
-
-      const lastMoveISO = a.lastMove ? new Date(a.lastMove).toISOString().slice(0, 10) : null;
-      const lastMoveAge = a.lastMove ? daysBetween(a.lastMove, Date.now()) : null;
-
-      const evidence: RowOut["evidence"] = [];
-
-      if (decision === "ORDER_NOW") {
-        evidence.push({ k: "Gap", v: `${formatNum(Math.max(0, reorderPoint - onHand))} to ROP`, tone: "red" });
-        evidence.push({ k: "ROP", v: `${formatNum(reorderPoint)} units`, tone: "amber" });
-      }
-
-      evidence.push({ k: "On hand", v: `${formatNum(onHand)}`, tone: onHand <= 0 ? "red" : "cyan" });
-
-      if (avgDailyOut > 0) {
-        evidence.push({ k: "Avg/day", v: `${formatNum(avgDailyOut)}`, tone: "steel" });
-        evidence.push({
-          k: "Cover",
-          v: daysCover >= 9999 ? "∞ days" : `${formatNum(daysCover)} d`,
-          tone: decision === "REDUCE" ? "violet" : decision === "ORDER_NOW" ? "red" : "green",
-        });
-      } else {
-        evidence.push({ k: "Out(30d)", v: `${formatNum(a.out30d)}`, tone: "steel" });
-      }
-
-      if (lastMoveISO) {
-        evidence.push({
-          k: "Last move",
-          v: lastMoveAge === null ? lastMoveISO : `${lastMoveISO} (${lastMoveAge}d ago)`,
-          tone: lastMoveAge !== null && lastMoveAge > 60 ? "amber" : "steel",
-        });
-      }
-
-      if (decision === "REDUCE") {
-        evidence.push({ k: "Policy", v: `>${overstockDaysN}d cover`, tone: "violet" });
-      }
-
-      if (decision === "DEAD") {
-        evidence.push({ k: "Signal", v: "No consumption in 30d", tone: "amber" });
-      }
-
-      out.push({
-        sku,
-        warehouse: wh,
-        onHand,
-        out30d: a.out30d,
-        avgDailyOut,
-        daysCover: daysCover >= 9999 ? 9999 : daysCover,
-        reorderPoint,
-        targetStock,
-        suggestedOrder,
-        decision,
-        severity,
-        lastMoveISO,
-        evidence,
-      });
-    }
+      // Build final row
+      return {
+        sku: ln.sku,
+        warehouse: ln.warehouse,
+        onHand: core.onHand,
+        out30d: core.out30d,
+        out90d: core.out90d,
+        avgDailyOut: core.avgDailyOut,
+        daysCover: core.daysCover,
+        reorderPoint: core.reorderPoint,
+        targetStock: core.targetStock,
+        suggestedOrder: core.suggestedOrder,
+        decision: core.decision,
+        severity: core.severity,
+        lastMoveISO: ln.lastMoveISO,
+        evidence: core.evidence,
+        profile: core.profile,
+        trend: core.trend,
+        cv30: core.cv30,
+        activeDays30: core.activeDays30,
+        loss30: core.loss30,
+        lossRate30: core.lossRate30,
+      };
+    });
 
     // sort: most urgent first
     out.sort((a, b) => {
@@ -563,8 +603,7 @@ export default function ResultsPage() {
       return b.severity - a.severity;
     });
 
-    const whList = Array.from(whSet);
-    whList.sort((a, b) => (a === "ALL" ? -1 : b === "ALL" ? 1 : a.localeCompare(b)));
+    const whList = ["ALL", ...engine.warehouses.filter((w) => w !== "ALL")];
 
     const k = {
       skuCount: new Set(out.map((r) => `${r.sku}||${r.warehouse}`)).size,
@@ -573,8 +612,13 @@ export default function ResultsPage() {
       reduce: out.filter((r) => r.decision === "REDUCE").length,
     };
 
-    return { rowsOut: out, warehouses: whList, kpis: k };
-  }, [hasMovements, hasMapping, movements, mappingV2, mvTypeValues, leadTimeDays, safetyDays, overstockDays]);
+    return {
+      rowsOut: out,
+      warehouses: whList,
+      warnings: engine.warnings,
+      kpis: k,
+    };
+  }, [movements, mappingV2, mvTypeValues, th]);
 
   const filtered = useMemo(() => {
     let x = rowsOut.slice();
@@ -597,15 +641,13 @@ export default function ResultsPage() {
     } else if (p === "BALANCED") {
       setLeadTimeDays(7);
       setSafetyDays(7);
-      setOverstockDays(90);
+      setOverstockDays(90); // ✅ default + recommended for evaluation horizon
     } else {
       setLeadTimeDays(3);
       setSafetyDays(3);
       setOverstockDays(120);
     }
   }
-
-  const showMissing = !hasMovements || !hasMapping;
 
   return (
     <div style={styles.wrap}>
@@ -639,14 +681,15 @@ export default function ResultsPage() {
             <span style={styles.pill}>⚡ Results</span>
             <h1 style={styles.h1}>Ops-ready decisions with evidence</h1>
             <p style={styles.p}>
-              This page reads <b style={{ color: "#e6e8ee" }}>V2 Movements</b> + your <b style={{ color: "#e6e8ee" }}>V2 Mapping</b>.
-              If anything is missing, it will show you exactly what’s missing.
+              This page reads <b style={{ color: "#e6e8ee" }}>V2 Movements</b> + your{" "}
+              <b style={{ color: "#e6e8ee" }}>Mapping</b> +{" "}
+              <b style={{ color: "#e6e8ee" }}>Movement Type Values</b>. Engine adds demand profiles, trend, volatility, and loss signals.
             </p>
 
             {showMissing ? (
               <div style={{ marginTop: 12 }}>
                 <div style={{ ...styles.p, marginTop: 6 }}>
-                  Missing demo data. Start from Upload (then Mapping) to generate results.
+                  Missing demo data. Start from Upload → Mapping → Movement Types.
                 </div>
 
                 <div style={styles.row}>
@@ -661,10 +704,13 @@ export default function ResultsPage() {
               <div style={{ marginTop: 12 }}>
                 <div style={styles.statusRow}>
                   <span style={styles.badgeOk}>Status: {statusText}</span>
-                  <span style={styles.small}>
-                    Rows: <b style={{ color: "#e6e8ee" }}>{movements?.rows?.length ?? 0}</b> • Warehouses:{" "}
-                    <b style={{ color: "#e6e8ee" }}>{warehouses.length - 1}</b>
-                  </span>
+                  {warnings?.length ? (
+                    <span style={{ ...styles.small, color: "#ffe9b3" }}>
+                      ⚠ {warnings.slice(0, 2).join(" • ")}
+                    </span>
+                  ) : (
+                    <span style={styles.small}>Engine OK • Smart signals enabled</span>
+                  )}
                 </div>
 
                 {/* KPI row */}
@@ -692,7 +738,7 @@ export default function ResultsPage() {
                   <div style={styles.cardPad}>
                     <div style={{ fontWeight: 950, fontSize: 16 }}>Policy thresholds</div>
                     <div style={{ ...styles.small, marginTop: 6 }}>
-                      You control these — no random assumptions.
+                      You control these — no random assumptions. (Overstock horizon default = <b>90</b>)
                     </div>
 
                     <div style={styles.row}>
@@ -720,7 +766,9 @@ export default function ResultsPage() {
                       >
                         Aggressive
                       </button>
-                      <span style={styles.small}>Preset: <b style={{ color: "#e6e8ee" }}>{preset}</b></span>
+                      <span style={styles.small}>
+                        Preset: <b style={{ color: "#e6e8ee" }}>{preset}</b>
+                      </span>
                     </div>
 
                     <div style={styles.controlGrid}>
@@ -802,7 +850,7 @@ export default function ResultsPage() {
                           <option value="DEAD">DEAD</option>
                           <option value="HEALTHY">HEALTHY</option>
                         </select>
-                        <div style={styles.small}>Order Now first by default.</div>
+                        <div style={styles.small}>Urgent signals first.</div>
                       </div>
 
                       <div style={styles.field}>
@@ -859,7 +907,9 @@ export default function ResultsPage() {
 
                             <td style={styles.td}>
                               <div style={{ fontWeight: 950, color: "#e6e8ee" }}>{r.sku}</div>
-                              <div style={styles.small}>{r.lastMoveISO ? `Last move: ${r.lastMoveISO}` : "Last move: —"}</div>
+                              <div style={styles.small}>
+                                {r.lastMoveISO ? `Last move: ${r.lastMoveISO}` : "Last move: —"}
+                              </div>
                             </td>
 
                             <td style={styles.td}>
@@ -869,9 +919,7 @@ export default function ResultsPage() {
                             <td style={styles.td}>{formatNum(r.onHand)}</td>
                             <td style={styles.td}>{formatNum(r.out30d)}</td>
 
-                            <td style={styles.td}>
-                              {r.daysCover >= 9999 ? "∞" : `${formatNum(r.daysCover)} d`}
-                            </td>
+                            <td style={styles.td}>{r.daysCover >= 9999 ? "∞" : `${formatNum(r.daysCover)} d`}</td>
 
                             <td style={styles.td}>{formatNum(r.reorderPoint)}</td>
 
@@ -882,7 +930,7 @@ export default function ResultsPage() {
 
                             <td style={styles.td}>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                                {r.evidence.slice(0, 6).map((c, i) => {
+                                {r.evidence.slice(0, 7).map((c, i) => {
                                   const ct = chipTone(c.tone);
                                   return (
                                     <span
