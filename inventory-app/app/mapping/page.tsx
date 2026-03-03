@@ -16,8 +16,7 @@ type BoxKind = "none" | "error" | "warning";
 export default function MappingPage() {
   const router = useRouter();
 
-  const movements =
-    typeof window !== "undefined" ? loadDatasetV2("movements") : null;
+  const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
 
   const headers = movements?.headers ?? [];
   const sampleRows = movements?.rows?.slice(0, 6) ?? [];
@@ -29,18 +28,13 @@ export default function MappingPage() {
   const guess = (candidates: string[]) =>
     headers.find((h) => candidates.includes(lower(h))) ?? "";
 
-  // load saved mapping (if any) first
   const saved = typeof window !== "undefined" ? loadMappingV2() : null;
 
-  /**
-   * ✅ IMPORTANT PATCH
-   * Use "saved" only if that column still exists in CURRENT headers.
-   * Because user may upload a NEW file with different headers, but old mapping stays in sessionStorage.
-   */
   const pick = (
     savedValue: string | undefined,
     candidates: string[],
-    fallbackIndex: number
+    fallbackIndex: number,
+    allowEmpty = false
   ) => {
     const sv = (savedValue ?? "").trim();
     if (sv && headers.includes(sv)) return sv;
@@ -48,9 +42,13 @@ export default function MappingPage() {
     const g = guess(candidates);
     if (g) return g;
 
-    return headers[fallbackIndex] ?? "";
+    const fb = headers[fallbackIndex] ?? "";
+    if (fb) return fb;
+
+    return allowEmpty ? "" : "";
   };
 
+  // Required
   const [itemId, setItemId] = useState<string>(
     pick(
       saved?.itemId,
@@ -83,29 +81,40 @@ export default function MappingPage() {
     )
   );
 
-  // Optional fields: saved only if exists; otherwise guess or empty
-  const [warehouse, setWarehouse] = useState<string>(() => {
-    const sv = (saved?.warehouse ?? "").trim();
-    if (sv && headers.includes(sv)) return sv;
+  // Optional
+  const [warehouse, setWarehouse] = useState<string>(
+    pick(
+      saved?.warehouse,
+      ["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"],
+      4,
+      true
+    )
+  );
 
-    return (
-      guess(["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"]) ||
-      ""
-    );
-  });
+  const [uom, setUom] = useState<string>(
+    pick(saved?.uom, ["uom", "unit", "unit_of_measure", "base_uom", "meins"], 5, true)
+  );
 
-  const [uom, setUom] = useState<string>(() => {
-    const sv = (saved?.uom ?? "").trim();
-    if (sv && headers.includes(sv)) return sv;
+  // NEW optional: unitCost + docId
+  const [unitCost, setUnitCost] = useState<string>(
+    pick(
+      saved?.unitCost,
+      ["unit_cost", "cost", "avg_cost", "price", "unitprice", "unit_price"],
+      6,
+      true
+    )
+  );
 
-    return guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) || "";
-  });
+  const [docId, setDocId] = useState<string>(
+    pick(
+      saved?.docId,
+      ["doc_id", "document_id", "docno", "document_no", "reference", "ref", "material_document"],
+      7,
+      true
+    )
+  );
 
-  /**
-   * ✅ OPTIONAL BUT STRONGLY RECOMMENDED PATCH
-   * If user uploads a NEW file (headers changed), auto-fix invalid selections.
-   * This prevents "stuck errors" where the dropdown value references a non-existing header.
-   */
+  // If new upload changes headers, auto-fix selections
   useEffect(() => {
     if (!headers.length) return;
 
@@ -113,10 +122,12 @@ export default function MappingPage() {
       current: string,
       set: (v: string) => void,
       candidates: string[],
-      fallbackIndex: number
+      fallbackIndex: number,
+      allowEmpty = false
     ) => {
       if (current && headers.includes(current)) return;
-      const next = guess(candidates) || headers[fallbackIndex] || "";
+
+      const next = guess(candidates) || headers[fallbackIndex] || (allowEmpty ? "" : "");
       set(next);
     };
 
@@ -145,16 +156,30 @@ export default function MappingPage() {
       3
     );
 
-    if (warehouse && !headers.includes(warehouse)) {
-      setWarehouse(
-        guess(["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"]) ||
-          ""
-      );
-    }
+    ensure(
+      warehouse,
+      setWarehouse,
+      ["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"],
+      4,
+      true
+    );
+    ensure(uom, setUom, ["uom", "unit", "unit_of_measure", "base_uom", "meins"], 5, true);
 
-    if (uom && !headers.includes(uom)) {
-      setUom(guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) || "");
-    }
+    ensure(
+      unitCost,
+      setUnitCost,
+      ["unit_cost", "cost", "avg_cost", "price", "unitprice", "unit_price"],
+      6,
+      true
+    );
+
+    ensure(
+      docId,
+      setDocId,
+      ["doc_id", "document_id", "docno", "document_no", "reference", "ref", "material_document"],
+      7,
+      true
+    );
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headers.join("|")]);
@@ -243,7 +268,12 @@ export default function MappingPage() {
 
       grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 } as CSSProperties,
 
-      field: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      field: {
+        padding: 12,
+        borderRadius: 14,
+        border: "1px solid #202946",
+        background: "rgba(20,27,48,0.55)",
+      } as CSSProperties,
       label: { fontSize: 12, color: "#aab1c4", marginBottom: 8 } as CSSProperties,
       select: {
         width: "100%",
@@ -339,29 +369,6 @@ export default function MappingPage() {
     setCanContinue(true);
   }
 
-  function basicMappingValidate(): string[] {
-    const errs: string[] = [];
-
-    if (!itemId || !date || !qty || !movementType) {
-      errs.push("Please map Item ID, Date, Quantity, and Movement Type.");
-      return errs;
-    }
-
-    const required = [itemId, date, qty, movementType];
-    if (new Set(required).size !== required.length) {
-      errs.push("Item ID / Date / Qty / Movement Type must be different columns.");
-    }
-
-    // quick delimiter sanity hint (if parsing produced 1 column)
-    if (headers.length === 1) {
-      errs.push(
-        "Only 1 column detected. Your CSV may use ';' or TAB delimiter. Re-export as CSV (comma) or upload a properly delimited file."
-      );
-    }
-
-    return errs;
-  }
-
   function buildMapping(): MovementsMapping {
     return {
       itemId,
@@ -370,14 +377,52 @@ export default function MappingPage() {
       movementType,
       warehouse: warehouse || undefined,
       uom: uom || undefined,
+      unitCost: unitCost || undefined,
+      docId: docId || undefined,
     };
   }
 
-  // ✅ FIXED: return validation result synchronously (no reliance on canContinue state)
+  function basicMappingValidate(): { errors: string[]; warnings: string[] } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!itemId || !date || !qty || !movementType) {
+      errors.push("Please map Item ID, Date, Quantity, and Movement Type.");
+      return { errors, warnings };
+    }
+
+    const required = [itemId, date, qty, movementType];
+    if (new Set(required).size !== required.length) {
+      errors.push("Item ID / Date / Qty / Movement Type must be different columns.");
+    }
+
+    if (headers.length === 1) {
+      errors.push(
+        "Only 1 column detected. Your CSV may use ';' or TAB delimiter. Re-export as CSV (comma) or upload a properly delimited file."
+      );
+      return { errors, warnings };
+    }
+
+    // Optional duplicates warning (not fatal)
+    const optionalPicked = [warehouse, uom, unitCost, docId].filter(Boolean);
+    const allPicked = [...required, ...optionalPicked];
+
+    const dup = findDuplicates(allPicked);
+    if (dup.length > 0) {
+      warnings.push(
+        `Some columns are mapped more than once: ${dup.slice(0, 6).join(", ")}${
+          dup.length > 6 ? "..." : ""
+        }. This is usually not intended.`
+      );
+    }
+
+    return { errors, warnings };
+  }
+
   function runFullValidation(showWarnings: boolean): { ok: boolean; warned: boolean } {
-    const basicErrs = basicMappingValidate();
-    if (basicErrs.length) {
-      setErrorBox("Fix mapping", basicErrs);
+    const base = basicMappingValidate();
+    if (base.errors.length) {
+      setErrorBox("Fix mapping", base.errors);
       return { ok: false, warned: false };
     }
 
@@ -389,8 +434,10 @@ export default function MappingPage() {
       return { ok: false, warned: false };
     }
 
-    if (showWarnings && v.warnings.length) {
-      setWarningBox("Looks good, but please review", v.warnings);
+    const mergedWarnings = [...base.warnings, ...(v.warnings ?? [])];
+
+    if (showWarnings && mergedWarnings.length) {
+      setWarningBox("Looks good, but please review", mergedWarnings);
       return { ok: true, warned: true };
     }
 
@@ -398,11 +445,10 @@ export default function MappingPage() {
     return { ok: true, warned: false };
   }
 
-  // Live validation: run when user changes mapping selections
   useEffect(() => {
     runFullValidation(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId, date, qty, movementType, warehouse, uom]);
+  }, [itemId, date, qty, movementType, warehouse, uom, unitCost, docId]);
 
   function continueNext() {
     const r = runFullValidation(true);
@@ -413,6 +459,9 @@ export default function MappingPage() {
   }
 
   const mappedRequiredCount = [itemId, date, qty, movementType].filter(Boolean).length;
+  const optText = `${warehouse ? "Warehouse ✓" : "No warehouse"} • ${uom ? "UOM ✓" : "No UOM"} • ${
+    unitCost ? "Unit Cost ✓" : "No cost"
+  } • ${docId ? "Doc ID ✓" : "No doc id"}`;
 
   return (
     <div style={styles.wrap}>
@@ -429,21 +478,34 @@ export default function MappingPage() {
             </div>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <a href="/" style={styles.link}>Home</a>
-              <a href="/upload" style={styles.link}>Upload</a>
+              <a href="/" style={styles.link}>
+                Home
+              </a>
+              <a href="/upload" style={styles.link}>
+                Upload
+              </a>
             </div>
           </div>
 
           <div style={styles.hero}>
-            {/* Left: Mapping */}
+            {/* Left */}
             <div className="anim-in anim-delay-2" style={styles.cardPad}>
               <span style={styles.pill}>🧩 Movements Mapping</span>
               <h1 style={styles.h1}>Tell us what each movement column means</h1>
               <p style={styles.p}>
-                This file is the inventory ledger. We only need a few columns to calculate stock and consumption.
+                This file is the inventory ledger. We only need a few columns to calculate stock and
+                consumption.
               </p>
 
-              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
                 <span style={styles.badge}>{fileName}</span>
                 <span style={{ fontSize: 12, color: "#8f97ad" }}>
                   {headers.length} columns • {rowsTotal} rows
@@ -451,27 +513,90 @@ export default function MappingPage() {
               </div>
 
               <div style={styles.grid}>
-                <Field label="Item ID / SKU" value={itemId} setValue={setItemId} headers={headers} styles={styles}
-                  hint="Unique identifier of the product/material." />
+                <Field
+                  label="Item ID / SKU"
+                  value={itemId}
+                  setValue={setItemId}
+                  headers={headers}
+                  styles={styles}
+                  hint="Unique identifier of the product/material."
+                />
 
-                <Field label="Movement Date" value={date} setValue={setDate} headers={headers} styles={styles}
-                  hint="Date of the movement (posting/document date)." />
+                <Field
+                  label="Movement Date"
+                  value={date}
+                  setValue={setDate}
+                  headers={headers}
+                  styles={styles}
+                  hint="Date of the movement (posting/document date)."
+                />
 
-                <Field label="Quantity" value={qty} setValue={setQty} headers={headers} styles={styles}
-                  hint="Movement quantity (can be positive or negative depending on the ERP)." />
+                <Field
+                  label="Quantity"
+                  value={qty}
+                  setValue={setQty}
+                  headers={headers}
+                  styles={styles}
+                  hint="Movement quantity (can be positive or negative depending on the ERP)."
+                />
 
-                <Field label="Movement Type" value={movementType} setValue={setMovementType} headers={headers} styles={styles}
-                  hint="What happened? receipt/issue/transfer/adjust/scrap..." />
+                <Field
+                  label="Movement Type"
+                  value={movementType}
+                  setValue={setMovementType}
+                  headers={headers}
+                  styles={styles}
+                  hint="What happened? receipt/issue/transfer/adjust/loss..."
+                />
 
-                <Field label="Warehouse (optional)" value={warehouse} setValue={setWarehouse} headers={["", ...headers]} styles={styles}
-                  hint="If you have multiple warehouses/locations, map it here." allowNone />
+                <Field
+                  label="Warehouse (optional)"
+                  value={warehouse}
+                  setValue={setWarehouse}
+                  headers={headers}
+                  styles={styles}
+                  hint="If you have multiple warehouses/locations, map it here."
+                  allowNone
+                />
 
-                <Field label="UOM (optional)" value={uom} setValue={setUom} headers={["", ...headers]} styles={styles}
-                  hint="Unit of measure (piece/case/liter...). Needed only if it exists." allowNone />
+                <Field
+                  label="UOM (optional)"
+                  value={uom}
+                  setValue={setUom}
+                  headers={headers}
+                  styles={styles}
+                  hint="Unit of measure (piece/case/liter...)."
+                  allowNone
+                />
+
+                <Field
+                  label="Unit Cost (optional)"
+                  value={unitCost}
+                  setValue={setUnitCost}
+                  headers={headers}
+                  styles={styles}
+                  hint="Optional unit cost/price for cash impact & loss value."
+                  allowNone
+                />
+
+                <Field
+                  label="Document / Ref ID (optional)"
+                  value={docId}
+                  setValue={setDocId}
+                  headers={headers}
+                  styles={styles}
+                  hint="Optional document reference to improve explainability."
+                  allowNone
+                />
               </div>
 
               <div style={styles.row}>
-                <button className="btn-glow" style={styles.btnGhost} type="button" onClick={() => router.push("/upload")}>
+                <button
+                  className="btn-glow"
+                  style={styles.btnGhost}
+                  type="button"
+                  onClick={() => router.push("/upload")}
+                >
                   Back
                 </button>
 
@@ -487,7 +612,6 @@ export default function MappingPage() {
                 </button>
               </div>
 
-              {/* Errors / warnings box */}
               {boxKind !== "none" ? (
                 <div
                   style={{
@@ -508,21 +632,28 @@ export default function MappingPage() {
               ) : null}
 
               <div style={styles.note}>
-                Next step (later): we’ll ask you to map movement type values (e.g., “GI” → ISSUE).
+                Next step: map movement type values (e.g., “GI” → OUT, “GR” → IN).
               </div>
             </div>
 
-            {/* Right: Preview */}
+            {/* Right */}
             <div className="hover-lift anim-in anim-delay-3" style={styles.cardPad}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  alignItems: "baseline",
+                }}
+              >
                 <div style={{ fontWeight: 950, fontSize: 18 }}>Preview</div>
                 <div style={{ fontSize: 12, color: "#aab1c4" }}>First 6 rows</div>
               </div>
 
               <div style={styles.kpiGrid}>
                 <KPI title="Mapped (required)" value={`${mappedRequiredCount}/4`} styles={styles} />
-                <KPI title="Optional" value={`${warehouse ? "Warehouse ✓" : "No warehouse"} • ${uom ? "UOM ✓" : "No UOM"}`} styles={styles} />
-                <KPI title="Next" value="Results" styles={styles} />
+                <KPI title="Optional" value={optText} styles={styles} />
+                <KPI title="Next" value="Movement Types" styles={styles} />
               </div>
 
               <div style={styles.tableWrap}>
@@ -530,7 +661,9 @@ export default function MappingPage() {
                   <thead>
                     <tr>
                       {headers.slice(0, 6).map((h) => (
-                        <th key={h} style={styles.th}>{h}</th>
+                        <th key={h} style={styles.th}>
+                          {h}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -538,7 +671,9 @@ export default function MappingPage() {
                     {sampleRows.map((r, idx) => (
                       <tr key={idx} style={styles.tr}>
                         {headers.slice(0, 6).map((h) => (
-                          <td key={h} style={styles.td}>{r[h] ?? ""}</td>
+                          <td key={h} style={styles.td}>
+                            {r[h] ?? ""}
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -552,8 +687,16 @@ export default function MappingPage() {
 
           <style jsx global>{`
             .bg-breathe {
-              background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
-                radial-gradient(900px 500px at 90% 20%, rgba(167, 139, 250, 0.1), transparent 60%),
+              background: radial-gradient(
+                  1200px 600px at 10% 10%,
+                  rgba(110, 231, 255, 0.08),
+                  transparent 55%
+                ),
+                radial-gradient(
+                  900px 500px at 90% 20%,
+                  rgba(167, 139, 250, 0.1),
+                  transparent 60%
+                ),
                 linear-gradient(180deg, #0f1630, #0b0f1a);
               background-size: 140% 140%;
               animation: breathe 14s ease-in-out infinite;
@@ -575,9 +718,15 @@ export default function MappingPage() {
               animation: fadeUp 650ms ease-out forwards;
             }
 
-            .anim-delay-1 { animation-delay: 80ms; }
-            .anim-delay-2 { animation-delay: 160ms; }
-            .anim-delay-3 { animation-delay: 240ms; }
+            .anim-delay-1 {
+              animation-delay: 80ms;
+            }
+            .anim-delay-2 {
+              animation-delay: 160ms;
+            }
+            .anim-delay-3 {
+              animation-delay: 240ms;
+            }
 
             @keyframes fadeUp {
               to {
@@ -594,7 +743,9 @@ export default function MappingPage() {
               box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
             }
 
-            .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
+            .btn-glow {
+              transition: transform 150ms ease, filter 150ms ease;
+            }
             .btn-glow:hover {
               transform: translateY(-1px);
               filter: drop-shadow(0 10px 20px rgba(110, 231, 255, 0.2));
@@ -618,6 +769,22 @@ export default function MappingPage() {
   );
 }
 
+/* =========================
+   Small helpers/components
+========================= */
+
+function findDuplicates(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const dup = new Set<string>();
+  for (const x of arr) {
+    const v = (x ?? "").trim();
+    if (!v) continue;
+    if (seen.has(v)) dup.add(v);
+    seen.add(v);
+  }
+  return Array.from(dup);
+}
+
 function Field({
   label,
   value,
@@ -635,12 +802,14 @@ function Field({
   hint: string;
   allowNone?: boolean;
 }) {
+  const options = allowNone ? ["", ...headers] : headers;
+
   return (
     <div style={styles.field}>
       <div style={styles.label}>{label}</div>
       <select style={styles.select} value={value} onChange={(e) => setValue(e.target.value)}>
-        {headers.map((h) => (
-          <option key={h || "__none"} value={h}>
+        {options.map((h, idx) => (
+          <option key={`${h || "__none"}_${idx}`} value={h}>
             {h || (allowNone ? "— none —" : "—")}
           </option>
         ))}
