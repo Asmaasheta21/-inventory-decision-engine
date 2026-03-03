@@ -14,8 +14,19 @@ import {
 
 type Bucket = "IN" | "OUT" | "OTHER";
 
-function uniq(arr: string[]) {
-  return Array.from(new Set(arr));
+/** keep original tokens but dedupe case-insensitive */
+function uniqCI(arr: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of arr ?? []) {
+    const t = norm(x);
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
 }
 
 function norm(x: string) {
@@ -25,10 +36,11 @@ function norm(x: string) {
 export default function MovementTypesPage() {
   const router = useRouter();
 
-  const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
-  const mapping: MovementsMapping | null = typeof window !== "undefined" ? loadMappingV2() : null;
+  const movements =
+    typeof window !== "undefined" ? loadDatasetV2("movements") : null;
+  const mapping: MovementsMapping | null =
+    typeof window !== "undefined" ? loadMappingV2() : null;
 
-  const headers = movements?.headers ?? [];
   const rows = movements?.rows ?? [];
   const fileName = movements?.fileName ?? "Movements.csv";
 
@@ -47,42 +59,87 @@ export default function MovementTypesPage() {
       const v = norm(r[movementTypeCol] ?? "");
       if (v) vals.push(v);
     }
-    // show unique sorted values
-    const u = uniq(vals);
+    // unique (case-insensitive) + sorted
+    const u = uniqCI(vals);
     u.sort((a, b) => a.localeCompare(b));
     return u;
   }, [rows, movementTypeCol]);
 
-  const saved = typeof window !== "undefined" ? loadMovementTypeValueMappingV2() : null;
+  const saved =
+    typeof window !== "undefined" ? loadMovementTypeValueMappingV2() : null;
 
-  const [inValues, setInValues] = useState<string[]>(saved?.inValues ?? []);
-  const [outValues, setOutValues] = useState<string[]>(saved?.outValues ?? []);
-  const [otherValues, setOtherValues] = useState<string[]>(saved?.otherValues ?? []);
+  /**
+   * ✅ PATCH: sanitize saved lists against current file values
+   * - remove values not in allValues
+   * - dedupe case-insensitive
+   * - ensure no overlaps (if overlap exists, OUT loses the duplicate by default)
+   */
+  const initialBuckets = useMemo(() => {
+    const setAll = new Set(allValues.map((x) => x.toLowerCase()));
+
+    const clean = (arr: string[]) =>
+      uniqCI(arr).filter((x) => setAll.has(x.toLowerCase()));
+
+    const inC = clean(saved?.inValues ?? []);
+    const outC = clean(saved?.outValues ?? []);
+    const otherC = clean(saved?.otherValues ?? []);
+
+    const inSet = new Set(inC.map((x) => x.toLowerCase()));
+    const outNoOverlap = outC.filter((x) => !inSet.has(x.toLowerCase()));
+
+    const used = new Set<string>();
+    inC.forEach((x) => used.add(x.toLowerCase()));
+    outNoOverlap.forEach((x) => used.add(x.toLowerCase()));
+
+    const otherNoOverlap = otherC.filter((x) => !used.has(x.toLowerCase()));
+
+    return { inC, outC: outNoOverlap, otherC: otherNoOverlap };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allValues.join("|")]); // stable for re-uploads
+
+  const [inValues, setInValues] = useState<string[]>(initialBuckets.inC);
+  const [outValues, setOutValues] = useState<string[]>(initialBuckets.outC);
+  const [otherValues, setOtherValues] = useState<string[]>(initialBuckets.otherC);
+
+  // if file changes (allValues changes), re-apply sanitized saved values once
+  // (keeps UX consistent when user uploads a new file)
+  useMemo(() => {
+    setInValues(initialBuckets.inC);
+    setOutValues(initialBuckets.outC);
+    setOtherValues(initialBuckets.otherC);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialBuckets.inC.join("|"), initialBuckets.outC.join("|"), initialBuckets.otherC.join("|")]);
 
   const pickedSet = useMemo(() => {
     const s = new Set<string>();
-    inValues.forEach((x) => s.add(x));
-    outValues.forEach((x) => s.add(x));
-    otherValues.forEach((x) => s.add(x));
+    inValues.forEach((x) => s.add(x.toLowerCase()));
+    outValues.forEach((x) => s.add(x.toLowerCase()));
+    otherValues.forEach((x) => s.add(x.toLowerCase()));
     return s;
   }, [inValues, outValues, otherValues]);
 
-  const unassigned = useMemo(() => allValues.filter((v) => !pickedSet.has(v)), [allValues, pickedSet]);
+  const unassigned = useMemo(
+    () => allValues.filter((v) => !pickedSet.has(v.toLowerCase())),
+    [allValues, pickedSet]
+  );
 
   function setBucket(value: string, bucket: Bucket) {
     setError("");
     setInfo("");
 
-    // remove from all first
-    const remove = (arr: string[]) => arr.filter((x) => x !== value);
+    const v = norm(value);
+    if (!v) return;
 
-    let nextIn = remove(inValues);
-    let nextOut = remove(outValues);
-    let nextOther = remove(otherValues);
+    // remove from all first (case-insensitive)
+    const removeCI = (arr: string[]) => arr.filter((x) => x.toLowerCase() !== v.toLowerCase());
 
-    if (bucket === "IN") nextIn = uniq([...nextIn, value]);
-    if (bucket === "OUT") nextOut = uniq([...nextOut, value]);
-    if (bucket === "OTHER") nextOther = uniq([...nextOther, value]);
+    let nextIn = removeCI(inValues);
+    let nextOut = removeCI(outValues);
+    let nextOther = removeCI(otherValues);
+
+    if (bucket === "IN") nextIn = uniqCI([...nextIn, v]);
+    if (bucket === "OUT") nextOut = uniqCI([...nextOut, v]);
+    if (bucket === "OTHER") nextOther = uniqCI([...nextOther, v]);
 
     setInValues(nextIn);
     setOutValues(nextOut);
@@ -112,9 +169,9 @@ export default function MovementTypesPage() {
       else nextOther.push(v);
     }
 
-    setInValues(uniq(nextIn));
-    setOutValues(uniq(nextOut));
-    setOtherValues(uniq(nextOther));
+    setInValues(uniqCI(nextIn));
+    setOutValues(uniqCI(nextOut));
+    setOtherValues(uniqCI(nextOther));
     setInfo("Auto-guess applied. Please review before continuing.");
   }
 
@@ -145,17 +202,27 @@ export default function MovementTypesPage() {
       return;
     }
 
+    // ✅ Overlap check (case-insensitive)
+    const inSet = new Set(inValues.map((x) => x.toLowerCase()));
+    const overlap = outValues.filter((x) => inSet.has(x.toLowerCase()));
+    if (overlap.length) {
+      setError(`Same value cannot be in IN and OUT: ${overlap.slice(0, 6).join(", ")}${overlap.length > 6 ? "..." : ""}`);
+      return;
+    }
+
     // Warn if a lot is unassigned (but don't block)
     if (unassigned.length > 0) {
-      setInfo(`Note: ${unassigned.length} values are still unassigned. They will be treated as OTHER (ignored) for now.`);
+      setInfo(
+        `Note: ${unassigned.length} values are still unassigned. They will be treated as OTHER (ignored) for now.`
+      );
     }
 
     // Save (unassigned will be auto treated as OTHER on save)
-    const finalOther = uniq([...otherValues, ...unassigned]);
+    const finalOther = uniqCI([...otherValues, ...unassigned]);
 
     saveMovementTypeValueMappingV2({
-      inValues: uniq(inValues),
-      outValues: uniq(outValues),
+      inValues: uniqCI(inValues),
+      outValues: uniqCI(outValues),
       otherValues: finalOther,
     });
 
@@ -283,11 +350,7 @@ export default function MovementTypesPage() {
         background: "rgba(255,255,255,0.06)",
       } as CSSProperties,
 
-      list: {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 8,
-      } as CSSProperties,
+      list: { display: "flex", flexWrap: "wrap", gap: 8 } as CSSProperties,
 
       chip: {
         display: "inline-flex",
@@ -302,7 +365,6 @@ export default function MovementTypesPage() {
       } as CSSProperties,
 
       chipValue: { fontWeight: 900 } as CSSProperties,
-
       chipBtns: { display: "inline-flex", gap: 6 } as CSSProperties,
 
       miniBtn: {
@@ -370,15 +432,9 @@ export default function MovementTypesPage() {
             </div>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <a href="/" style={styles.link}>
-                Home
-              </a>
-              <a href="/upload" style={styles.link}>
-                Upload
-              </a>
-              <a href="/mapping" style={styles.link}>
-                Mapping
-              </a>
+              <a href="/" style={styles.link}>Home</a>
+              <a href="/upload" style={styles.link}>Upload</a>
+              <a href="/mapping" style={styles.link}>Mapping</a>
             </div>
           </div>
 
@@ -399,12 +455,8 @@ export default function MovementTypesPage() {
             </div>
 
             <div style={styles.row}>
-              <button style={styles.btnGhost} onClick={autoGuess} type="button">
-                Auto-guess
-              </button>
-              <button style={styles.btnGhost} onClick={clearAll} type="button">
-                Clear
-              </button>
+              <button style={styles.btnGhost} onClick={autoGuess} type="button">Auto-guess</button>
+              <button style={styles.btnGhost} onClick={clearAll} type="button">Clear</button>
               <button style={styles.btnPrimary} onClick={validateAndContinue} type="button">
                 Save & Continue → Results
               </button>
@@ -421,7 +473,6 @@ export default function MovementTypesPage() {
               subtitle="Receipts / Stock added"
               pillStyle={styles.pillIn}
               values={inValues}
-              onMove={(v) => setBucket(v, "IN")}
               onMoveTo={(v, b) => setBucket(v, b)}
               styles={styles}
             />
@@ -430,7 +481,6 @@ export default function MovementTypesPage() {
               subtitle="Issues / Sales / Consumption"
               pillStyle={styles.pillOut}
               values={outValues}
-              onMove={(v) => setBucket(v, "OUT")}
               onMoveTo={(v, b) => setBucket(v, b)}
               styles={styles}
             />
@@ -439,7 +489,6 @@ export default function MovementTypesPage() {
               subtitle="Transfers / Adjustments / Scrap (ignored)"
               pillStyle={styles.pillOther}
               values={otherValues}
-              onMove={(v) => setBucket(v, "OTHER")}
               onMoveTo={(v, b) => setBucket(v, b)}
               styles={styles}
             />
@@ -460,15 +509,9 @@ export default function MovementTypesPage() {
                   <div key={v} style={styles.chip}>
                     <span style={styles.chipValue}>{v}</span>
                     <span style={styles.chipBtns}>
-                      <button style={styles.miniBtn} onClick={() => setBucket(v, "IN")}>
-                        IN
-                      </button>
-                      <button style={styles.miniBtn} onClick={() => setBucket(v, "OUT")}>
-                        OUT
-                      </button>
-                      <button style={styles.miniBtn} onClick={() => setBucket(v, "OTHER")}>
-                        OTHER
-                      </button>
+                      <button style={styles.miniBtn} onClick={() => setBucket(v, "IN")}>IN</button>
+                      <button style={styles.miniBtn} onClick={() => setBucket(v, "OUT")}>OUT</button>
+                      <button style={styles.miniBtn} onClick={() => setBucket(v, "OTHER")}>OTHER</button>
                     </span>
                   </div>
                 ))}
@@ -504,7 +547,6 @@ function BucketCard({
   subtitle: string;
   pillStyle: any;
   values: string[];
-  onMove: (v: string) => void;
   onMoveTo: (v: string, b: "IN" | "OUT" | "OTHER") => void;
   styles: any;
 }) {
@@ -528,19 +570,13 @@ function BucketCard({
                 <span style={styles.chipValue}>{v}</span>
                 <span style={styles.chipBtns}>
                   {title !== "IN" ? (
-                    <button style={styles.miniBtn} onClick={() => onMoveTo(v, "IN")}>
-                      IN
-                    </button>
+                    <button style={styles.miniBtn} onClick={() => onMoveTo(v, "IN")}>IN</button>
                   ) : null}
                   {title !== "OUT" ? (
-                    <button style={styles.miniBtn} onClick={() => onMoveTo(v, "OUT")}>
-                      OUT
-                    </button>
+                    <button style={styles.miniBtn} onClick={() => onMoveTo(v, "OUT")}>OUT</button>
                   ) : null}
                   {title !== "OTHER" ? (
-                    <button style={styles.miniBtn} onClick={() => onMoveTo(v, "OTHER")}>
-                      OTHER
-                    </button>
+                    <button style={styles.miniBtn} onClick={() => onMoveTo(v, "OTHER")}>OTHER</button>
                   ) : null}
                 </span>
               </div>
@@ -579,12 +615,8 @@ function GlobalStyles() {
         animation: fadeUp 650ms ease-out forwards;
       }
 
-      .anim-delay-1 {
-        animation-delay: 80ms;
-      }
-      .anim-delay-2 {
-        animation-delay: 160ms;
-      }
+      .anim-delay-1 { animation-delay: 80ms; }
+      .anim-delay-2 { animation-delay: 160ms; }
 
       @keyframes fadeUp {
         to {
