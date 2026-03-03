@@ -74,17 +74,14 @@ type RowOut = {
   dataFlags: string[];
   confidenceExplain: string[];
 
-  // Optional (if columns exist)
   unitCost?: number;
   unitPrice?: number;
   moq?: number;
   casePack?: number;
 
-  // Optional impact
   stockoutRiskValue?: number;
   overstockValue?: number;
 
-  // Demo-only: Pro preview rows generated from severity signals
   proPreview: ProTeaseRow[];
 };
 
@@ -108,22 +105,39 @@ type KPIOut = {
   recommendations: string[];
 };
 
+type MappingV1 = {
+  sku: string;
+  onHand: string;
+  sales30d: string;
+  warehouse?: string;
+};
+
 /* =========================================================
    Page
 ========================================================= */
 
 export default function ResultsPage() {
-  const upload = typeof window !== "undefined" ? loadUpload() : null;
-  const mapping = typeof window !== "undefined" ? loadMapping() : null;
+  // V1-driven Results page
+  const uploadRaw = typeof window !== "undefined" ? (loadUpload() as any) : null;
+  const mappingRaw = typeof window !== "undefined" ? (loadMapping() as any) : null;
+
+  const rows = getUploadRows(uploadRaw);
+  const mapping = normalizeMapping(mappingRaw);
 
   const initialT =
     typeof window !== "undefined"
-      ? loadThresholds()
+      ? (loadThresholds() as any)
       : { leadTimeDays: 7, safetyDays: 7, overstockDays: 90 };
 
-  const [leadTimeDays, setLeadTimeDays] = useState<number>(initialT.leadTimeDays);
-  const [safetyDays, setSafetyDays] = useState<number>(initialT.safetyDays);
-  const [overstockDays, setOverstockDays] = useState<number>(initialT.overstockDays);
+  const [leadTimeDays, setLeadTimeDays] = useState<number>(
+    safeNum(toNumber(initialT?.leadTimeDays ?? 7), 0)
+  );
+  const [safetyDays, setSafetyDays] = useState<number>(
+    safeNum(toNumber(initialT?.safetyDays ?? 7), 0)
+  );
+  const [overstockDays, setOverstockDays] = useState<number>(
+    safeNum(toNumber(initialT?.overstockDays ?? 90), 1)
+  );
 
   const [preset, setPreset] = useState<
     "CUSTOM" | "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE"
@@ -233,36 +247,12 @@ export default function ResultsPage() {
 
       badge: (tone: EvidenceTone) => {
         const map = {
-          cyan: {
-            b: "rgba(110,231,255,0.25)",
-            bg: "rgba(110,231,255,0.08)",
-            c: "#dfe3f1",
-          },
-          amber: {
-            b: "rgba(255,170,70,0.28)",
-            bg: "rgba(255,170,70,0.10)",
-            c: "#ffd9a8",
-          },
-          green: {
-            b: "rgba(120,255,170,0.25)",
-            bg: "rgba(120,255,170,0.08)",
-            c: "#c7ffe0",
-          },
-          red: {
-            b: "rgba(255,80,80,0.25)",
-            bg: "rgba(255,80,80,0.08)",
-            c: "#ffd4d4",
-          },
-          violet: {
-            b: "rgba(167,139,250,0.28)",
-            bg: "rgba(167,139,250,0.10)",
-            c: "#e6dcff",
-          },
-          steel: {
-            b: "rgba(170,177,196,0.22)",
-            bg: "rgba(170,177,196,0.08)",
-            c: "#c8cee0",
-          },
+          cyan: { b: "rgba(110,231,255,0.25)", bg: "rgba(110,231,255,0.08)", c: "#dfe3f1" },
+          amber: { b: "rgba(255,170,70,0.28)", bg: "rgba(255,170,70,0.10)", c: "#ffd9a8" },
+          green: { b: "rgba(120,255,170,0.25)", bg: "rgba(120,255,170,0.08)", c: "#c7ffe0" },
+          red: { b: "rgba(255,80,80,0.25)", bg: "rgba(255,80,80,0.08)", c: "#ffd4d4" },
+          violet: { b: "rgba(167,139,250,0.28)", bg: "rgba(167,139,250,0.10)", c: "#e6dcff" },
+          steel: { b: "rgba(170,177,196,0.22)", bg: "rgba(170,177,196,0.08)", c: "#c8cee0" },
         }[tone];
 
         return {
@@ -437,34 +427,50 @@ export default function ResultsPage() {
         border: "1px solid rgba(255,80,80,0.25)",
         background: "rgba(255,80,80,0.06)",
       } as CSSProperties,
-
-      proTable: {
-        width: "100%",
-        borderCollapse: "separate",
-        borderSpacing: "0 8px",
-      } as CSSProperties,
-
-      proRow: {
-        padding: 10,
-        borderRadius: 14,
-        border: "1px solid #202946",
-        background: "rgba(20,27,48,0.55)",
-      } as CSSProperties,
     };
   }, []);
 
-  if (!upload || !mapping) {
+  // ✅ Guard: don’t block unless mapping is truly invalid or rows missing
+  const mappingOk = isValidMapping(mapping);
+  const rowsOk = Array.isArray(rows) && rows.length > 0;
+
+  if (!rowsOk || !mappingOk) {
     return (
       <div style={styles.wrap}>
         <div className="bg-breathe" style={{ minHeight: "100vh" }}>
           <div style={styles.container}>
             <div style={styles.cardPad}>
               <h1 style={styles.h1}>Ops Control</h1>
-              <p style={styles.p}>Missing demo data. Start from Upload.</p>
-              <a className="btn-glow" href="/upload" style={styles.btnPrimary as any}>
-                Go to Upload
-              </a>
+              <p style={styles.p}>
+                Missing demo data. Start from Upload (then Mapping) to generate results.
+              </p>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                <a className="btn-glow" href="/upload" style={styles.btnPrimary as any}>
+                  Go to Upload
+                </a>
+                <a className="btn-glow" href="/mapping" style={styles.btnGhost as any}>
+                  Go to Mapping
+                </a>
+              </div>
+
+              <div style={{ marginTop: 12, ...styles.muted }}>
+                <div>
+                  Status:{" "}
+                  <b style={{ color: "#e6e8ee" }}>
+                    {rowsOk ? "Upload ✓" : "Upload ✗"} •{" "}
+                    {mappingOk ? "Mapping ✓" : "Mapping ✗"}
+                  </b>
+                </div>
+                {!mappingOk && (
+                  <div style={{ marginTop: 6 }}>
+                    Mapping must include: <b>sku</b>, <b>onHand</b>, <b>sales30d</b> (warehouse optional).
+                  </div>
+                )}
+              </div>
             </div>
+
+            <style>{globalCss}</style>
           </div>
         </div>
       </div>
@@ -477,7 +483,7 @@ export default function ResultsPage() {
     overstockDays: safeNum(overstockDays, 1),
   };
 
-  const allRows = buildResultsPremium(upload.rows, mapping, thresholds);
+  const allRows = buildResultsPremium(rows, mapping, thresholds);
 
   const warehouses = Array.from(new Set(allRows.map((r) => r.warehouse))).sort();
   const filtered = applyFilters(allRows, warehouseFilter, decisionFilter, search);
@@ -607,9 +613,7 @@ export default function ResultsPage() {
               <div style={styles.logo} />
               <div>
                 <div style={styles.title}>Inventory Decision Engine</div>
-                <div style={styles.subtitle}>
-                  Demo • Ops Action Queue • Evidence-based decisions
-                </div>
+                <div style={styles.subtitle}>Demo • Ops Action Queue • Evidence-based decisions</div>
               </div>
             </div>
 
@@ -623,7 +627,14 @@ export default function ResultsPage() {
           <div style={styles.grid}>
             {/* LEFT */}
             <div className="anim-in anim-delay-2" style={styles.cardPad}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
                 <div>
                   <h1 style={styles.h1}>Ops Action Queue</h1>
                   <p style={styles.p}>
@@ -632,7 +643,11 @@ export default function ResultsPage() {
                   </p>
                 </div>
 
-                <span style={styles.badge(kpi.alertScore >= 70 ? "red" : kpi.alertScore >= 45 ? "amber" : "cyan")}>
+                <span
+                  style={styles.badge(
+                    kpi.alertScore >= 70 ? "red" : kpi.alertScore >= 45 ? "amber" : "cyan"
+                  )}
+                >
                   Alert Score: {kpi.alertScore}/100
                 </span>
               </div>
@@ -805,7 +820,11 @@ export default function ResultsPage() {
 
                 <div style={{ minWidth: 220 }}>
                   <div style={styles.label}>Sort</div>
-                  <select style={styles.select} value={sort} onChange={(e) => setSort(e.target.value as any)}>
+                  <select
+                    style={styles.select}
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as any)}
+                  >
                     <option value="SEVERITY">Severity (high→low)</option>
                     <option value="IMPACT">Impact (money first)</option>
                     <option value="SUGGESTED">Suggested order (high→low)</option>
@@ -875,7 +894,11 @@ export default function ResultsPage() {
                             </td>
 
                             <td style={styles.td}>
-                              <span style={styles.badge(r.confidence >= 80 ? "green" : r.confidence >= 60 ? "amber" : "red")}>
+                              <span
+                                style={styles.badge(
+                                  r.confidence >= 80 ? "green" : r.confidence >= 60 ? "amber" : "red"
+                                )}
+                              >
                                 {r.confidence}%
                               </span>
                               {r.dataFlags.length > 0 && (
@@ -983,7 +1006,7 @@ export default function ResultsPage() {
                                     </div>
 
                                     <div style={{ marginTop: 12, ...styles.blur }}>
-                                      <table style={styles.proTable}>
+                                      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" }}>
                                         <thead>
                                           <tr>
                                             <th style={{ ...styles.th, borderRadius: 10 }}>Signal</th>
@@ -996,7 +1019,15 @@ export default function ResultsPage() {
                                           {r.proPreview.slice(0, 4).map((p, idx) => (
                                             <tr key={idx}>
                                               <td style={styles.td}>
-                                                <span style={styles.badge(p.signal === "Transfer" ? "violet" : p.signal === "Safety" ? "amber" : "steel")}>
+                                                <span
+                                                  style={styles.badge(
+                                                    p.signal === "Transfer"
+                                                      ? "violet"
+                                                      : p.signal === "Safety"
+                                                      ? "amber"
+                                                      : "steel"
+                                                  )}
+                                                >
                                                   {p.signal}
                                                 </span>
                                               </td>
@@ -1066,7 +1097,9 @@ export default function ResultsPage() {
                         style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}
                       >
                         <div>
-                          <div style={{ fontWeight: 950 }}>{r.sku} <span style={styles.muted}>• {r.warehouse}</span></div>
+                          <div style={{ fontWeight: 950 }}>
+                            {r.sku} <span style={styles.muted}>• {r.warehouse}</span>
+                          </div>
                           <div style={styles.muted}>{r.actionTitle}</div>
                         </div>
                         <span style={styles.badge(r.severity >= 85 ? "red" : r.severity >= 65 ? "amber" : "violet")}>
@@ -1114,38 +1147,7 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          <style jsx global>{`
-            .bg-breathe {
-              background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
-                radial-gradient(900px 500px at 90% 20%, rgba(167, 139, 250, 0.1), transparent 60%),
-                linear-gradient(180deg, #0f1630, #0b0f1a);
-              background-size: 140% 140%;
-              animation: breathe 14s ease-in-out infinite;
-            }
-            @keyframes breathe {
-              0%, 100% { background-position: 0% 0%, 100% 0%, 50% 50%; }
-              50% { background-position: 10% 8%, 92% 12%, 50% 50%; }
-            }
-            .anim-in { opacity: 0; transform: translateY(10px); animation: fadeUp 650ms ease-out forwards; }
-            .anim-delay-1 { animation-delay: 80ms; }
-            .anim-delay-2 { animation-delay: 160ms; }
-            .anim-delay-3 { animation-delay: 240ms; }
-            @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
-            .hover-lift { transition: transform 200ms ease, box-shadow 200ms ease; }
-            .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 15px 40px rgba(0,0,0,0.35); }
-            .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
-            .btn-glow:hover { transform: translateY(-1px); filter: drop-shadow(0 10px 20px rgba(110,231,255,0.2)); }
-            tr.row-hoverable:hover {
-              background: rgba(20,27,48,0.72) !important;
-              box-shadow: 0 10px 26px rgba(0,0,0,0.28);
-              transform: translateY(-1px);
-            }
-            @media (prefers-reduced-motion: reduce) {
-              .anim-in, .bg-breathe, .hover-lift, .btn-glow {
-                animation: none !important; transition: none !important; transform: none !important; opacity: 1 !important;
-              }
-            }
-          `}</style>
+          <style>{globalCss}</style>
         </div>
       </div>
     </div>
@@ -1153,18 +1155,18 @@ export default function ResultsPage() {
 }
 
 /* =========================================================
-   PREMIUM LOGIC
+   Premium Logic
 ========================================================= */
 
-function buildResultsPremium(rows: Record<string, string>[], m: any, t: Thresholds): RowOut[] {
+function buildResultsPremium(rows: Record<string, string>[], m: MappingV1, t: Thresholds): RowOut[] {
   const targetCover = Math.max(0, t.leadTimeDays + t.safetyDays);
 
-  // Pass 1: demand distribution (for “premium” normalization)
+  // Pass 1: demand distribution (for normalization)
   const avgDailyList: number[] = [];
   for (const row of rows) {
-    const sku = (row?.[m?.sku] ?? "").toString().trim();
+    const sku = (row?.[m.sku] ?? "").toString().trim();
     if (!sku) continue;
-    const sales30d = toNumber(row?.[m?.sales30d] ?? "0");
+    const sales30d = toNumber(row?.[m.sales30d] ?? "0");
     const avgDaily = sales30d / 30;
     if (avgDaily > 0 && Number.isFinite(avgDaily)) avgDailyList.push(avgDaily);
   }
@@ -1177,20 +1179,20 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
     maxDaily: Math.max(1e-6, avgDailyList.length ? avgDailyList[avgDailyList.length - 1] : 1),
   };
 
-  // Pass 2: compute outputs
   const out: RowOut[] = [];
 
   for (const row of rows) {
-    const sku = (row?.[m?.sku] ?? "").toString().trim();
+    const sku = (row?.[m.sku] ?? "").toString().trim();
     if (!sku) continue;
 
-    const wh = m?.warehouse ? ((row?.[m?.warehouse] ?? "").toString().trim() || "—") : "—";
+    const wh = m.warehouse ? ((row?.[m.warehouse] ?? "").toString().trim() || "—") : "—";
 
-    const onHand = toNumber(row?.[m?.onHand] ?? "0");
-    const sales30d = toNumber(row?.[m?.sales30d] ?? "0");
+    const onHand = toNumber(row?.[m.onHand] ?? "0");
+    const sales30d = toNumber(row?.[m.sales30d] ?? "0");
 
     const avgDaily = sales30d / 30;
-    const daysCover = avgDaily > 0 ? onHand / avgDaily : onHand > 0 ? 9999 : 0;
+    const daysCover =
+      avgDaily > 0 ? onHand / avgDaily : onHand > 0 ? 9999 : 0;
 
     const reorderPoint = avgDaily * targetCover;
     const suggestedOrder = Math.max(0, Math.round(reorderPoint - onHand));
@@ -1203,20 +1205,7 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
 
     const rounded = roundOrder(suggestedOrder, moq, casePack);
 
-    const {
-      decision,
-      severity,
-      confidence,
-      actionTitle,
-      reason,
-      tips,
-      stockoutRiskValue,
-      overstockValue,
-      dataFlags,
-      confidenceExplain,
-      evidence,
-      proPreview,
-    } = classifyPremium({
+    const classified = classifyPremium({
       sku,
       warehouse: wh,
       onHand,
@@ -1245,22 +1234,11 @@ function buildResultsPremium(rows: Record<string, string>[], m: any, t: Threshol
       reorderPoint,
       suggestedOrder,
       suggestedOrderRounded: rounded,
-      decision,
-      severity,
-      confidence,
-      actionTitle,
-      reason,
-      tips,
-      evidence,
-      dataFlags,
-      confidenceExplain,
+      ...classified,
       unitCost: isFiniteNum(unitCost) ? unitCost : undefined,
       unitPrice: isFiniteNum(unitPrice) ? unitPrice : undefined,
       moq: isFiniteNum(moq) ? moq : undefined,
       casePack: isFiniteNum(casePack) ? casePack : undefined,
-      stockoutRiskValue,
-      overstockValue,
-      proPreview,
     });
   }
 
@@ -1331,12 +1309,10 @@ function classifyPremium(x: {
   if (sales30d < 0) dataFlags.push("Negative sales (returns/adjustments may be mixed).");
   if (sales30d === 0 && onHand > 0) dataFlags.push("No demand in 30 days while stock exists (slow/dead risk).");
   if (avgDaily > 0 && daysCover > 999) dataFlags.push("Extremely high cover (check sales period / outliers).");
-  if (avgDaily === 0 && sales30d !== 0) dataFlags.push("Demand anomaly (avgDaily=0 but sales30d!=0).");
 
   // Confidence heuristic (transparent)
   let confidence = 100;
   const explain: string[] = [];
-
   const penalty = (pts: number, msg: string) => {
     confidence -= pts;
     explain.push(`-${pts}: ${msg}`);
@@ -1366,7 +1342,6 @@ function classifyPremium(x: {
   const velocityClass =
     avgDaily >= params.p80Daily ? "FAST" : avgDaily >= params.p50Daily ? "MEDIUM" : "SLOW";
 
-  // Severity components (0..1)
   const urgencyLead = lead > 0 ? clamp((lead - daysToStockout) / lead, 0, 1) : 0;
   const urgencyTarget = targetCover > 0 ? clamp((targetCover - daysToStockout) / targetCover, 0, 1) : 0;
   const shortageRatio = reorderPoint > 0 ? clamp(unitsMissing / reorderPoint, 0, 1) : 0;
@@ -1386,28 +1361,16 @@ function classifyPremium(x: {
     { k: "Lead", v: `${lead}d`, tone: "steel" },
     { k: "ROP", v: `${Math.round(reorderPoint)}`, tone: "steel" },
     { k: "Miss", v: `${Math.max(0, Math.round(unitsMissing))}`, tone: unitsMissing > 0 ? "amber" : "green" },
-    { k: "Vel", v: velocityClass, tone: velocityClass === "FAST" ? "violet" : velocityClass === "MEDIUM" ? "cyan" : "steel" },
+    {
+      k: "Vel",
+      v: velocityClass,
+      tone: velocityClass === "FAST" ? "violet" : velocityClass === "MEDIUM" ? "cyan" : "steel",
+    },
     ...(moq ? [{ k: "MOQ", v: `${moq}`, tone: "steel" as EvidenceTone }] : []),
     ...(casePack ? [{ k: "Pack", v: `${casePack}`, tone: "steel" as EvidenceTone }] : []),
   ];
 
-  // Pro preview: generated hints (blurred)
-  const proPreview: ProTeaseRow[] = buildProPreview({
-    sku,
-    warehouse,
-    decision: "HEALTHY",
-    severity: 0,
-    avgDaily,
-    daysCover,
-    lead,
-    safety,
-    overstockDays,
-    stockoutRiskValue,
-    overstockValue,
-  });
-
   // Decision logic (policy-driven)
-  // 1) No sales
   if (sales30d <= 0) {
     if (onHand > 0) {
       const deadLike = onHand >= 50 || daysCover >= overstockDays;
@@ -1482,10 +1445,9 @@ function classifyPremium(x: {
     };
   }
 
-  // 2) Stockout now
+  // Stockout now
   if (avgDaily > 0 && onHand <= 0) {
     const sev = 98;
-
     return {
       decision: "ORDER_NOW",
       severity: sev,
@@ -1518,7 +1480,7 @@ function classifyPremium(x: {
     };
   }
 
-  // 3) Critical: stockout before lead time
+  // Critical: stockout before lead time
   if (daysToStockout < lead) {
     const sev = clamp(
       Math.round(55 + urgencyLead * 30 + velocityScore * 10 + shortageRatio * 20),
@@ -1560,7 +1522,7 @@ function classifyPremium(x: {
     };
   }
 
-  // 4) Watch: below target cover
+  // Watch: below target cover
   if (daysToStockout < targetCover) {
     const sev = clamp(Math.round(25 + urgencyTarget * 60 + velocityScore * 10), 0, 100);
 
@@ -1598,10 +1560,14 @@ function classifyPremium(x: {
     };
   }
 
-  // 5) Overstock
+  // Overstock
   if (avgDaily > 0 && daysCover > overstockDays) {
     const excess = daysCover - overstockDays;
-    const sev = clamp(Math.round(45 + excess * 0.35 + (velocityClass === "SLOW" ? 10 : 0)), 0, 100);
+    const sev = clamp(
+      Math.round(45 + excess * 0.35 + (velocityClass === "SLOW" ? 10 : 0)),
+      0,
+      100
+    );
 
     return {
       decision: "REDUCE",
@@ -1635,7 +1601,7 @@ function classifyPremium(x: {
     };
   }
 
-  // 6) Healthy
+  // Healthy
   const sev = clamp(Math.round(8 + (velocityClass === "FAST" ? 4 : 2)), 0, 100);
 
   return {
@@ -1667,7 +1633,7 @@ function classifyPremium(x: {
 }
 
 /* =========================================================
-   KPI + NARRATIVE
+   KPI + Narrative
 ========================================================= */
 
 function computeKPIsPremium(all: RowOut[], t: Thresholds): KPIOut {
@@ -1702,11 +1668,13 @@ function computeKPIsPremium(all: RowOut[], t: Thresholds): KPIOut {
   const totalOverstockValue = round2(all.reduce((s, r) => s + (r.overstockValue ?? 0), 0));
 
   const topUrgent = [...all].sort((a, b) => b.severity - a.severity).slice(0, 10);
-  const topValueRisk = [...all].sort((a, b) => {
-    const ai = (a.stockoutRiskValue ?? 0) + (a.overstockValue ?? 0);
-    const bi = (b.stockoutRiskValue ?? 0) + (b.overstockValue ?? 0);
-    return bi - ai;
-  }).slice(0, 10);
+  const topValueRisk = [...all]
+    .sort((a, b) => {
+      const ai = (a.stockoutRiskValue ?? 0) + (a.overstockValue ?? 0);
+      const bi = (b.stockoutRiskValue ?? 0) + (b.overstockValue ?? 0);
+      return bi - ai;
+    })
+    .slice(0, 10);
 
   const targetCover = t.leadTimeDays + t.safetyDays;
 
@@ -1760,7 +1728,7 @@ function renderOpsNarrativePremium(kpi: KPIOut, t: Thresholds) {
 }
 
 /* =========================================================
-   Pro Preview Generator (Demo-only)
+   Pro Preview (Demo-only)
 ========================================================= */
 
 function buildProPreview(x: {
@@ -1776,11 +1744,21 @@ function buildProPreview(x: {
   stockoutRiskValue?: number;
   overstockValue?: number;
 }): ProTeaseRow[] {
-  const { sku, warehouse, decision, severity, avgDaily, daysCover, lead, safety, overstockDays, stockoutRiskValue, overstockValue } = x;
+  const {
+    sku,
+    warehouse,
+    decision,
+    severity,
+    avgDaily,
+    daysCover,
+    lead,
+    safety,
+    overstockDays,
+    stockoutRiskValue,
+    overstockValue,
+  } = x;
 
-  // Deterministic pseudo-signals (no randomness)
   const baseImpact = Math.round(((stockoutRiskValue ?? 0) + (overstockValue ?? 0)) || (severity * 120));
-
   const rows: ProTeaseRow[] = [];
 
   if (decision === "ORDER_NOW" || (avgDaily > 0 && daysCover < lead)) {
@@ -1844,7 +1822,7 @@ function buildProPreview(x: {
 }
 
 /* =========================================================
-   UI Helpers
+   UI helpers
 ========================================================= */
 
 function decisionBadge(styles: any, d: Decision): CSSProperties {
@@ -1873,6 +1851,42 @@ function KPI({ title, value, sub, styles }: { title: string; value: any; sub: st
       <div style={styles.kpiS}>{sub}</div>
     </div>
   );
+}
+
+/* =========================================================
+   Guard + Normalizers (fix “missing demo data” false positives)
+========================================================= */
+
+function getUploadRows(upload: any): Record<string, string>[] {
+  // Supports: { rows }, { payload: { rows } }, { data: { rows } }
+  const direct = upload?.rows;
+  const payload = upload?.payload?.rows;
+  const data = upload?.data?.rows;
+  const rows = direct ?? payload ?? data;
+  return Array.isArray(rows) ? rows : [];
+}
+
+function normalizeMapping(m: any): MappingV1 | null {
+  if (!m || typeof m !== "object") return null;
+
+  // Some implementations nest mapping under { mapping } or { mappingV1 }
+  const cand = (m.mapping ?? m.mappingV1 ?? m) as any;
+
+  const sku = (cand?.sku ?? "").toString();
+  const onHand = (cand?.onHand ?? cand?.on_hand ?? "").toString();
+  const sales30d = (cand?.sales30d ?? cand?.sales_30d ?? "").toString();
+  const warehouse = cand?.warehouse != null ? cand.warehouse.toString() : undefined;
+
+  const out: MappingV1 = { sku, onHand, sales30d };
+  if (warehouse) out.warehouse = warehouse;
+
+  return out;
+}
+
+function isValidMapping(m: MappingV1 | null): m is MappingV1 {
+  if (!m) return false;
+  if (!m.sku || !m.onHand || !m.sales30d) return false;
+  return true;
 }
 
 /* =========================================================
@@ -1914,12 +1928,8 @@ function pickOptNumber(row: Record<string, string>, keys: string[]) {
 
 function roundOrder(raw: number, moq?: number, casePack?: number) {
   let x = Math.max(0, Math.round(raw));
-  if (casePack && casePack > 0) {
-    x = Math.ceil(x / casePack) * casePack;
-  }
-  if (moq && moq > 0) {
-    x = Math.max(x, moq);
-  }
+  if (casePack && casePack > 0) x = Math.ceil(x / casePack) * casePack;
+  if (moq && moq > 0) x = Math.max(x, moq);
   return x;
 }
 
@@ -1938,3 +1948,40 @@ function money(n: number) {
   const x = Math.round(n);
   return x.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
+
+/* =========================================================
+   Global CSS (plain style tag)
+========================================================= */
+
+const globalCss = `
+  .bg-breathe {
+    background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 255, 0.08), transparent 55%),
+      radial-gradient(900px 500px at 90% 20%, rgba(167, 139, 250, 0.1), transparent 60%),
+      linear-gradient(180deg, #0f1630, #0b0f1a);
+    background-size: 140% 140%;
+    animation: breathe 14s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { background-position: 0% 0%, 100% 0%, 50% 50%; }
+    50% { background-position: 10% 8%, 92% 12%, 50% 50%; }
+  }
+  .anim-in { opacity: 0; transform: translateY(10px); animation: fadeUp 650ms ease-out forwards; }
+  .anim-delay-1 { animation-delay: 80ms; }
+  .anim-delay-2 { animation-delay: 160ms; }
+  .anim-delay-3 { animation-delay: 240ms; }
+  @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+  .hover-lift { transition: transform 200ms ease, box-shadow 200ms ease; }
+  .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 15px 40px rgba(0,0,0,0.35); }
+  .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
+  .btn-glow:hover { transform: translateY(-1px); filter: drop-shadow(0 10px 20px rgba(110,231,255,0.2)); }
+  tr.row-hoverable:hover {
+    background: rgba(20,27,48,0.72) !important;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+    transform: translateY(-1px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .anim-in, .bg-breathe, .hover-lift, .btn-glow {
+      animation: none !important; transition: none !important; transform: none !important; opacity: 1 !important;
+    }
+  }
+`;
