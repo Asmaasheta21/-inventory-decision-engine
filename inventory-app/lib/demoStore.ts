@@ -215,7 +215,8 @@ function parseLineWithDelimiter(line: string, delimiter: string): string[] {
     }
 
     if (ch === delimiter && !inQuotes) {
-      out.push(cur.trim());
+      // ⚠️ don't trim here; let cleanCell decide
+      out.push(cur);
       cur = "";
       continue;
     }
@@ -223,14 +224,25 @@ function parseLineWithDelimiter(line: string, delimiter: string): string[] {
     cur += ch;
   }
 
-  out.push(cur.trim());
+  out.push(cur);
   return out;
 }
 
+/**
+ * Clean cell content:
+ * - trims
+ * - removes wrapping quotes ONLY if the whole cell is wrapped
+ */
 function cleanCell(x: string): string {
   const s = (x ?? "").toString().trim();
-  // Remove wrapping quotes if any
-  return s.replace(/^"|"$/g, "").trim();
+
+  // Remove wrapping quotes if any: "abc" => abc
+  // but don't remove a single quote at one side by mistake
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    return s.slice(1, -1).trim();
+  }
+
+  return s;
 }
 
 /**
@@ -240,6 +252,8 @@ function cleanCell(x: string): string {
  * - Strip BOM
  * - Unique headers to avoid overwriting
  * - Handles quotes + delimiters inside quotes
+ *
+ * Note: does NOT support multiline quoted fields (demo-friendly).
  */
 export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
   const normalized = stripBOM(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -270,11 +284,30 @@ export function parseCSV(text: string): { headers: string[]; rows: DemoRow[] } {
   return { headers, rows };
 }
 
-/** Convert string to number safely. Supports "1,234" and empty. */
+/**
+ * Convert string to number safely.
+ * Supports:
+ * - "1,234" and "1 234"
+ * - "(123)" => -123 (accounting negative)
+ * - empty => 0
+ *
+ * Note: Not locale-aware for European "1.234,50" formats (kept demo-simple).
+ */
 export function toNumber(x: string): number {
-  const cleaned = (x ?? "").toString().replace(/,/g, "").trim();
+  const raw = (x ?? "").toString().trim();
+  if (!raw) return 0;
+
+  // (123) => -123
+  const isAccountingNeg = /^\(.*\)$/.test(raw);
+  const unwrapped = isAccountingNeg ? raw.slice(1, -1) : raw;
+
+  const cleaned = unwrapped
+    .replace(/[\s,]/g, "") // remove spaces + commas
+    .trim();
+
   const n = Number(cleaned);
-  return Number.isFinite(n) ? n : 0;
+  const v = Number.isFinite(n) ? n : 0;
+  return isAccountingNeg ? -v : v;
 }
 
 /* =========================================================
@@ -417,7 +450,7 @@ export function loadMappingV2(): MovementsMapping | null {
 }
 
 /* -------------------------------
-   V2 Mapping (Movement Type Values)  ✅ NEW
+   V2 Mapping (Movement Type Values)
 -------------------------------- */
 
 function normToken(x: string): string {
@@ -493,8 +526,10 @@ export function validateMovementTypeValueMapping(
   const outs = uniqueTokens(mapping?.outValues ?? []);
   const others = uniqueTokens(mapping?.otherValues ?? []);
 
-  if (ins.length === 0) errors.push("IN values list is empty (you must map at least one IN/receipt value).");
-  if (outs.length === 0) errors.push("OUT values list is empty (you must map at least one OUT/issue value).");
+  if (ins.length === 0)
+    errors.push("IN values list is empty (you must map at least one IN/receipt value).");
+  if (outs.length === 0)
+    errors.push("OUT values list is empty (you must map at least one OUT/issue value).");
 
   const inSet = new Set(ins.map(normToken));
   const outSet = new Set(outs.map(normToken));
@@ -503,14 +538,19 @@ export function validateMovementTypeValueMapping(
   for (const t of inSet) if (outSet.has(t)) overlap.push(t);
 
   if (overlap.length > 0) {
-    errors.push(`IN/OUT lists overlap (same value in both): ${overlap.slice(0, 8).join(", ")}${overlap.length > 8 ? "..." : ""}`);
+    errors.push(
+      `IN/OUT lists overlap (same value in both): ${overlap
+        .slice(0, 8)
+        .join(", ")}${overlap.length > 8 ? "..." : ""}`
+    );
   }
 
   // Not an error, but good to flag
   const otherSet = new Set(others.map(normToken));
   let otherOverlap = 0;
   for (const t of otherSet) if (inSet.has(t) || outSet.has(t)) otherOverlap++;
-  if (otherOverlap > 0) warnings.push("Some OTHER values also exist in IN/OUT lists. Consider removing duplicates.");
+  if (otherOverlap > 0)
+    warnings.push("Some OTHER values also exist in IN/OUT lists. Consider removing duplicates.");
 
   return { ok: errors.length === 0, errors, warnings };
 }
@@ -533,9 +573,14 @@ export type MovementsValidation = {
 };
 
 function looksLikeNumber(x: string): boolean {
-  const cleaned = (x ?? "").toString().replace(/,/g, "").trim();
+  const cleaned = (x ?? "").toString().trim();
   if (cleaned === "") return false;
-  const n = Number(cleaned);
+
+  // accept (123) too
+  const isAccountingNeg = /^\(.*\)$/.test(cleaned);
+  const unwrapped = isAccountingNeg ? cleaned.slice(1, -1) : cleaned;
+
+  const n = Number(unwrapped.replace(/[\s,]/g, "").trim());
   return Number.isFinite(n);
 }
 
@@ -556,7 +601,9 @@ export function validateMovementsDataset(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const requiredCols = [mapping.itemId, mapping.date, mapping.qty, mapping.movementType].filter(Boolean);
+  const requiredCols = [mapping.itemId, mapping.date, mapping.qty, mapping.movementType].filter(
+    Boolean
+  );
   if (requiredCols.length !== 4) {
     errors.push("Missing required mapping fields (Item ID, Date, Qty, Movement Type).");
   }
@@ -607,7 +654,9 @@ export function validateMovementsDataset(
 
   // hard-fail conditions
   if (missingReq === sampleSize && sampleSize > 0) {
-    errors.push("Movements sample rows are missing required values (item/date/qty/type). Check mapping or CSV data.");
+    errors.push(
+      "Movements sample rows are missing required values (item/date/qty/type). Check mapping or CSV data."
+    );
   }
 
   // warnings (not hard fail)
@@ -617,11 +666,14 @@ export function validateMovementsDataset(
   // hint for negative qty reality
   let neg = 0;
   for (let i = 0; i < sampleSize; i++) {
-    const q = (rows[i]?.[mapping.qty] ?? "").toString().replace(/,/g, "").trim();
-    const n = Number(q);
+    const qRaw = (rows[i]?.[mapping.qty] ?? "").toString().trim();
+    const n = toNumber(qRaw);
     if (Number.isFinite(n) && n < 0) neg++;
   }
-  if (neg > 0) warnings.push(`Detected negative quantities in ${neg}/${sampleSize} checked rows (this is common in some ERPs).`);
+  if (neg > 0)
+    warnings.push(
+      `Detected negative quantities in ${neg}/${sampleSize} checked rows (this is common in some ERPs).`
+    );
 
   const ok = errors.length === 0;
 

@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadDatasetV2,
-  saveMappingV2,
   loadMappingV2,
-  type MovementsMapping,
+  saveMappingV2,
   validateMovementsDataset,
+  type MovementsMapping,
 } from "@/lib/demoStore";
 
 type BoxKind = "none" | "error" | "warning";
@@ -16,14 +16,15 @@ type BoxKind = "none" | "error" | "warning";
 export default function MappingPage() {
   const router = useRouter();
 
-  const movements = typeof window !== "undefined" ? loadDatasetV2("movements") : null;
+  const movements =
+    typeof window !== "undefined" ? loadDatasetV2("movements") : null;
 
   const headers = movements?.headers ?? [];
   const sampleRows = movements?.rows?.slice(0, 6) ?? [];
   const fileName = movements?.fileName ?? "Movements.csv";
   const rowsTotal = movements?.rows?.length ?? 0;
 
-  const lower = (s: string) => s.toLowerCase().trim();
+  const lower = (s: string) => (s ?? "").toString().toLowerCase().trim();
 
   const guess = (candidates: string[]) =>
     headers.find((h) => candidates.includes(lower(h))) ?? "";
@@ -31,43 +32,132 @@ export default function MappingPage() {
   // load saved mapping (if any) first
   const saved = typeof window !== "undefined" ? loadMappingV2() : null;
 
+  /**
+   * ✅ IMPORTANT PATCH
+   * Use "saved" only if that column still exists in CURRENT headers.
+   * Because user may upload a NEW file with different headers, but old mapping stays in sessionStorage.
+   */
+  const pick = (
+    savedValue: string | undefined,
+    candidates: string[],
+    fallbackIndex: number
+  ) => {
+    const sv = (savedValue ?? "").trim();
+    if (sv && headers.includes(sv)) return sv;
+
+    const g = guess(candidates);
+    if (g) return g;
+
+    return headers[fallbackIndex] ?? "";
+  };
+
   const [itemId, setItemId] = useState<string>(
-    saved?.itemId ||
-      guess(["item_id", "sku", "material", "material_id", "item", "itemcode", "item_code"]) ||
-      headers[0] ||
-      ""
+    pick(
+      saved?.itemId,
+      ["item_id", "sku", "material", "material_id", "item", "itemcode", "item_code"],
+      0
+    )
   );
 
   const [date, setDate] = useState<string>(
-    saved?.date ||
-      guess(["date", "posting_date", "movement_date", "doc_date", "document_date"]) ||
-      headers[1] ||
-      ""
+    pick(
+      saved?.date,
+      ["date", "posting_date", "movement_date", "doc_date", "document_date"],
+      1
+    )
   );
 
   const [qty, setQty] = useState<string>(
-    saved?.qty ||
-      guess(["qty", "quantity", "movement_qty", "issue_qty", "receipt_qty", "amount"]) ||
-      headers[2] ||
-      ""
+    pick(
+      saved?.qty,
+      ["qty", "quantity", "movement_qty", "issue_qty", "receipt_qty", "amount"],
+      2
+    )
   );
 
   const [movementType, setMovementType] = useState<string>(
-    saved?.movementType ||
-      guess(["movement_type", "mov_type", "type", "mvt", "transaction_type", "movement"]) ||
-      headers[3] ||
-      ""
+    pick(
+      saved?.movementType,
+      ["movement_type", "mov_type", "type", "mvt", "transaction_type", "movement"],
+      3
+    )
   );
 
-  const [warehouse, setWarehouse] = useState<string>(
-    saved?.warehouse ||
+  // Optional fields: saved only if exists; otherwise guess or empty
+  const [warehouse, setWarehouse] = useState<string>(() => {
+    const sv = (saved?.warehouse ?? "").trim();
+    if (sv && headers.includes(sv)) return sv;
+
+    return (
       guess(["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"]) ||
       ""
-  );
+    );
+  });
 
-  const [uom, setUom] = useState<string>(
-    saved?.uom || guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) || ""
-  );
+  const [uom, setUom] = useState<string>(() => {
+    const sv = (saved?.uom ?? "").trim();
+    if (sv && headers.includes(sv)) return sv;
+
+    return guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) || "";
+  });
+
+  /**
+   * ✅ OPTIONAL BUT STRONGLY RECOMMENDED PATCH
+   * If user uploads a NEW file (headers changed), auto-fix invalid selections.
+   * This prevents "stuck errors" where the dropdown value references a non-existing header.
+   */
+  useEffect(() => {
+    if (!headers.length) return;
+
+    const ensure = (
+      current: string,
+      set: (v: string) => void,
+      candidates: string[],
+      fallbackIndex: number
+    ) => {
+      if (current && headers.includes(current)) return;
+      const next = guess(candidates) || headers[fallbackIndex] || "";
+      set(next);
+    };
+
+    ensure(
+      itemId,
+      setItemId,
+      ["item_id", "sku", "material", "material_id", "item", "itemcode", "item_code"],
+      0
+    );
+    ensure(
+      date,
+      setDate,
+      ["date", "posting_date", "movement_date", "doc_date", "document_date"],
+      1
+    );
+    ensure(
+      qty,
+      setQty,
+      ["qty", "quantity", "movement_qty", "issue_qty", "receipt_qty", "amount"],
+      2
+    );
+    ensure(
+      movementType,
+      setMovementType,
+      ["movement_type", "mov_type", "type", "mvt", "transaction_type", "movement"],
+      3
+    );
+
+    if (warehouse && !headers.includes(warehouse)) {
+      setWarehouse(
+        guess(["warehouse", "wh", "location", "plant", "storage_location", "sloc", "store"]) ||
+          ""
+      );
+    }
+
+    if (uom && !headers.includes(uom)) {
+      setUom(guess(["uom", "unit", "unit_of_measure", "base_uom", "meins"]) || "");
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headers.join("|")]);
 
   // Separate boxes: errors vs warnings
   const [boxKind, setBoxKind] = useState<BoxKind>("none");
@@ -79,7 +169,8 @@ export default function MappingPage() {
     const card: CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
-      background: "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
+      background:
+        "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
     };
 
     const btn: CSSProperties = {
@@ -97,8 +188,16 @@ export default function MappingPage() {
     };
 
     return {
-      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
-      container: { maxWidth: 1080, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
+      wrap: {
+        minHeight: "100vh",
+        color: "#e6e8ee",
+        fontFamily: "Arial, sans-serif",
+      } as CSSProperties,
+      container: {
+        maxWidth: 1080,
+        margin: "0 auto",
+        padding: "18px 20px 60px",
+      } as CSSProperties,
       topbar: {
         display: "flex",
         alignItems: "center",
@@ -107,10 +206,21 @@ export default function MappingPage() {
         marginBottom: 18,
       } as CSSProperties,
       brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
-      logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as CSSProperties,
+      logo: {
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
+      } as CSSProperties,
       title: { fontWeight: 900, letterSpacing: 0.2 } as CSSProperties,
       subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
-      link: { color: "#b7bed1", textDecoration: "none", padding: "8px 10px", borderRadius: 10, border: "1px solid transparent" } as CSSProperties,
+      link: {
+        color: "#b7bed1",
+        textDecoration: "none",
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid transparent",
+      } as CSSProperties,
 
       hero: { display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 } as CSSProperties,
 
@@ -157,26 +267,9 @@ export default function MappingPage() {
         cursor: "not-allowed",
       } as CSSProperties,
 
-      // Notice boxes (premium)
-      boxBase: {
-        marginTop: 12,
-        padding: 12,
-        borderRadius: 12,
-        lineHeight: 1.55,
-      } as CSSProperties,
-
-      boxError: {
-        border: "1px solid rgba(255,80,80,0.35)",
-        background: "rgba(255,80,80,0.08)",
-        color: "#ffd4d4",
-      } as CSSProperties,
-
-      boxWarn: {
-        border: "1px solid rgba(255,196,0,0.28)",
-        background: "rgba(255,196,0,0.08)",
-        color: "#ffe9b3",
-      } as CSSProperties,
-
+      boxBase: { marginTop: 12, padding: 12, borderRadius: 12, lineHeight: 1.55 } as CSSProperties,
+      boxError: { border: "1px solid rgba(255,80,80,0.35)", background: "rgba(255,80,80,0.08)", color: "#ffd4d4" } as CSSProperties,
+      boxWarn: { border: "1px solid rgba(255,196,0,0.28)", background: "rgba(255,196,0,0.08)", color: "#ffe9b3" } as CSSProperties,
       boxTitle: { fontWeight: 950, marginBottom: 6 } as CSSProperties,
       boxList: { margin: 0, paddingLeft: 18 } as CSSProperties,
 
@@ -282,14 +375,12 @@ export default function MappingPage() {
 
   // ✅ FIXED: return validation result synchronously (no reliance on canContinue state)
   function runFullValidation(showWarnings: boolean): { ok: boolean; warned: boolean } {
-    // 1) basic mapping validation
     const basicErrs = basicMappingValidate();
     if (basicErrs.length) {
       setErrorBox("Fix mapping", basicErrs);
       return { ok: false, warned: false };
     }
 
-    // 2) dataset validation using mapping
     const mapping = buildMapping();
     const v = validateMovementsDataset(headers, movements?.rows ?? [], mapping);
 
@@ -298,7 +389,6 @@ export default function MappingPage() {
       return { ok: false, warned: false };
     }
 
-    // if ok but warnings exist
     if (showWarnings && v.warnings.length) {
       setWarningBox("Looks good, but please review", v.warnings);
       return { ok: true, warned: true };
@@ -310,20 +400,15 @@ export default function MappingPage() {
 
   // Live validation: run when user changes mapping selections
   useEffect(() => {
-    // don't spam warnings; validate quietly unless it's blocking
     runFullValidation(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId, date, qty, movementType, warehouse, uom]);
 
   function continueNext() {
     const r = runFullValidation(true);
-
-    // ✅ if blocking errors, stop immediately
     if (!r.ok) return;
 
-    const mapping = buildMapping();
-    saveMappingV2(mapping);
-
+    saveMappingV2(buildMapping());
     router.push("/movement-types");
   }
 
@@ -344,12 +429,8 @@ export default function MappingPage() {
             </div>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <a href="/" style={styles.link}>
-                Home
-              </a>
-              <a href="/upload" style={styles.link}>
-                Upload
-              </a>
+              <a href="/" style={styles.link}>Home</a>
+              <a href="/upload" style={styles.link}>Upload</a>
             </div>
           </div>
 
@@ -370,61 +451,23 @@ export default function MappingPage() {
               </div>
 
               <div style={styles.grid}>
-                <Field
-                  label="Item ID / SKU"
-                  value={itemId}
-                  setValue={setItemId}
-                  headers={headers}
-                  styles={styles}
-                  hint="Unique identifier of the product/material."
-                />
+                <Field label="Item ID / SKU" value={itemId} setValue={setItemId} headers={headers} styles={styles}
+                  hint="Unique identifier of the product/material." />
 
-                <Field
-                  label="Movement Date"
-                  value={date}
-                  setValue={setDate}
-                  headers={headers}
-                  styles={styles}
-                  hint="Date of the movement (posting/document date)."
-                />
+                <Field label="Movement Date" value={date} setValue={setDate} headers={headers} styles={styles}
+                  hint="Date of the movement (posting/document date)." />
 
-                <Field
-                  label="Quantity"
-                  value={qty}
-                  setValue={setQty}
-                  headers={headers}
-                  styles={styles}
-                  hint="Movement quantity (can be positive or negative depending on the ERP)."
-                />
+                <Field label="Quantity" value={qty} setValue={setQty} headers={headers} styles={styles}
+                  hint="Movement quantity (can be positive or negative depending on the ERP)." />
 
-                <Field
-                  label="Movement Type"
-                  value={movementType}
-                  setValue={setMovementType}
-                  headers={headers}
-                  styles={styles}
-                  hint="What happened? receipt/issue/transfer/adjust/scrap..."
-                />
+                <Field label="Movement Type" value={movementType} setValue={setMovementType} headers={headers} styles={styles}
+                  hint="What happened? receipt/issue/transfer/adjust/scrap..." />
 
-                <Field
-                  label="Warehouse (optional)"
-                  value={warehouse}
-                  setValue={setWarehouse}
-                  headers={["", ...headers]}
-                  styles={styles}
-                  hint="If you have multiple warehouses/locations, map it here."
-                  allowNone
-                />
+                <Field label="Warehouse (optional)" value={warehouse} setValue={setWarehouse} headers={["", ...headers]} styles={styles}
+                  hint="If you have multiple warehouses/locations, map it here." allowNone />
 
-                <Field
-                  label="UOM (optional)"
-                  value={uom}
-                  setValue={setUom}
-                  headers={["", ...headers]}
-                  styles={styles}
-                  hint="Unit of measure (piece/case/liter...). Needed only if it exists."
-                  allowNone
-                />
+                <Field label="UOM (optional)" value={uom} setValue={setUom} headers={["", ...headers]} styles={styles}
+                  hint="Unit of measure (piece/case/liter...). Needed only if it exists." allowNone />
               </div>
 
               <div style={styles.row}>
@@ -478,11 +521,7 @@ export default function MappingPage() {
 
               <div style={styles.kpiGrid}>
                 <KPI title="Mapped (required)" value={`${mappedRequiredCount}/4`} styles={styles} />
-                <KPI
-                  title="Optional"
-                  value={`${warehouse ? "Warehouse ✓" : "No warehouse"} • ${uom ? "UOM ✓" : "No UOM"}`}
-                  styles={styles}
-                />
+                <KPI title="Optional" value={`${warehouse ? "Warehouse ✓" : "No warehouse"} • ${uom ? "UOM ✓" : "No UOM"}`} styles={styles} />
                 <KPI title="Next" value="Results" styles={styles} />
               </div>
 
@@ -491,9 +530,7 @@ export default function MappingPage() {
                   <thead>
                     <tr>
                       {headers.slice(0, 6).map((h) => (
-                        <th key={h} style={styles.th}>
-                          {h}
-                        </th>
+                        <th key={h} style={styles.th}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -501,9 +538,7 @@ export default function MappingPage() {
                     {sampleRows.map((r, idx) => (
                       <tr key={idx} style={styles.tr}>
                         {headers.slice(0, 6).map((h) => (
-                          <td key={h} style={styles.td}>
-                            {r[h] ?? ""}
-                          </td>
+                          <td key={h} style={styles.td}>{r[h] ?? ""}</td>
                         ))}
                       </tr>
                     ))}
@@ -540,15 +575,9 @@ export default function MappingPage() {
               animation: fadeUp 650ms ease-out forwards;
             }
 
-            .anim-delay-1 {
-              animation-delay: 80ms;
-            }
-            .anim-delay-2 {
-              animation-delay: 160ms;
-            }
-            .anim-delay-3 {
-              animation-delay: 240ms;
-            }
+            .anim-delay-1 { animation-delay: 80ms; }
+            .anim-delay-2 { animation-delay: 160ms; }
+            .anim-delay-3 { animation-delay: 240ms; }
 
             @keyframes fadeUp {
               to {
@@ -565,9 +594,7 @@ export default function MappingPage() {
               box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
             }
 
-            .btn-glow {
-              transition: transform 150ms ease, filter 150ms ease;
-            }
+            .btn-glow { transition: transform 150ms ease, filter 150ms ease; }
             .btn-glow:hover {
               transform: translateY(-1px);
               filter: drop-shadow(0 10px 20px rgba(110, 231, 255, 0.2));

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import {
   loadDatasetV2,
@@ -162,13 +163,13 @@ export default function MovementTypesPage() {
   }
 
   const styles = useMemo(() => {
-    const card: React.CSSProperties = {
+    const card: CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
       background: "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
     };
 
-    const btn: React.CSSProperties = {
+    const btn: CSSProperties = {
       padding: "10px 14px",
       borderRadius: 12,
       fontWeight: 800,
@@ -183,8 +184,8 @@ export default function MovementTypesPage() {
     };
 
     return {
-      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as React.CSSProperties,
-      container: { maxWidth: 1120, margin: "0 auto", padding: "18px 20px 60px" } as React.CSSProperties,
+      wrap: { minHeight: "100vh", color: "#e6e8ee", fontFamily: "Arial, sans-serif" } as CSSProperties,
+      container: { maxWidth: 1120, margin: "0 auto", padding: "18px 20px 60px" } as CSSProperties,
 
       topbar: {
         display: "flex",
@@ -192,12 +193,12 @@ export default function MovementTypesPage() {
         justifyContent: "space-between",
         gap: 12,
         marginBottom: 18,
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      brand: { display: "flex", alignItems: "center", gap: 10 } as React.CSSProperties,
-      logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as React.CSSProperties,
-      title: { fontWeight: 900, letterSpacing: 0.2 } as React.CSSProperties,
-      subtitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+      brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
+      logo: { width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6ee7ff,#a78bfa)" } as CSSProperties,
+      title: { fontWeight: 900, letterSpacing: 0.2 } as CSSProperties,
+      subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
 
       link: {
         color: "#b7bed1",
@@ -205,9 +206,9 @@ export default function MovementTypesPage() {
         padding: "8px 10px",
         borderRadius: 10,
         border: "1px solid transparent",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      hero: { ...card, padding: 18, marginBottom: 14 } as React.CSSProperties,
+      hero: { ...card, padding: 18, marginBottom: 14 } as CSSProperties,
 
       pill: {
         display: "inline-block",
@@ -218,15 +219,15 @@ export default function MovementTypesPage() {
         color: "#dfe3f1",
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      h1: { margin: "10px 0 8px", fontSize: 26, lineHeight: 1.15 } as React.CSSProperties,
-      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
+      h1: { margin: "10px 0 8px", fontSize: 26, lineHeight: 1.15 } as CSSProperties,
+      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
 
-      grid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } as React.CSSProperties,
+      grid: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 } as CSSProperties,
 
       card,
-      cardPad: { ...card, padding: 16 } as React.CSSProperties,
+      cardPad: { ...card, padding: 16 } as CSSProperties,
 
       badge: {
         display: "inline-block",
@@ -237,14 +238,14 @@ export default function MovementTypesPage() {
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
         color: "#dfe3f1",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as React.CSSProperties,
-      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      kpiTitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
-      kpiValue: { fontSize: 18, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
+      kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 12 } as CSSProperties,
+      kpi: { padding: 12, borderRadius: 14, border: "1px solid #202946", background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      kpiValue: { fontSize: 18, fontWeight: 950, marginTop: 6 } as CSSProperties,
 
-      sectionTitle: { fontWeight: 950, marginBottom: 10 } as React.CSSProperties,
+      sectionTitle: { fontWeight: 950, marginBottom: 10 } as CSSProperties,
 
       pillIn: {
         display: "inline-flex",
@@ -256,7 +257,7 @@ export default function MovementTypesPage() {
         fontWeight: 950,
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       pillOut: {
         display: "inline-flex",
@@ -268,7 +269,7 @@ export default function MovementTypesPage() {
         fontWeight: 950,
         border: "1px solid rgba(167,139,250,0.30)",
         background: "rgba(167,139,250,0.10)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       pillOther: {
         display: "inline-flex",
@@ -280,13 +281,13 @@ export default function MovementTypesPage() {
         fontWeight: 950,
         border: "1px solid rgba(255,255,255,0.18)",
         background: "rgba(255,255,255,0.06)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       list: {
         display: "flex",
         flexWrap: "wrap",
         gap: 8,
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       chip: {
         display: "inline-flex",
@@ -298,11 +299,11 @@ export default function MovementTypesPage() {
         background: "rgba(20,27,48,0.55)",
         color: "#e6e8ee",
         fontSize: 13,
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      chipValue: { fontWeight: 900 } as React.CSSProperties,
+      chipValue: { fontWeight: 900 } as CSSProperties,
 
-      chipBtns: { display: "inline-flex", gap: 6 } as React.CSSProperties,
+      chipBtns: { display: "inline-flex", gap: 6 } as CSSProperties,
 
       miniBtn: {
         padding: "6px 8px",
@@ -313,15 +314,15 @@ export default function MovementTypesPage() {
         cursor: "pointer",
         fontWeight: 850,
         fontSize: 12,
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as React.CSSProperties,
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 } as CSSProperties,
 
-      btnPrimary: { padding: "10px 14px", borderRadius: 12, fontWeight: 900, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as React.CSSProperties,
-      btnGhost: { ...btn, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as React.CSSProperties,
+      btnPrimary: { padding: "10px 14px", borderRadius: 12, fontWeight: 900, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6ee7ff,#a78bfa)", color: "#0b0f1a" } as CSSProperties,
+      btnGhost: { ...btn, background: "transparent", border: "1px solid #2a3350", color: "#e6e8ee" } as CSSProperties,
 
-      error: { marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid rgba(255,80,80,0.35)", background: "rgba(255,80,80,0.08)", color: "#ffd4d4" } as React.CSSProperties,
-      info: { marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid rgba(110,231,255,0.35)", background: "rgba(110,231,255,0.08)", color: "#dfefff" } as React.CSSProperties,
+      error: { marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid rgba(255,80,80,0.35)", background: "rgba(255,80,80,0.08)", color: "#ffd4d4" } as CSSProperties,
+      info: { marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid rgba(110,231,255,0.35)", background: "rgba(110,231,255,0.08)", color: "#dfefff" } as CSSProperties,
     };
   }, []);
 

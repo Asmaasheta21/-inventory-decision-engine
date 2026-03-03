@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";   // 👈 ضيفي ده هنا
 import { useRouter } from "next/navigation";
+
 import {
   clearAllDemo,
   clearDatasetV2,
@@ -89,13 +91,13 @@ export default function UploadPage() {
   const hasMovements = !!loadDatasetV2("movements");
 
   const styles = useMemo(() => {
-    const card: React.CSSProperties = {
+    const card: CSSProperties = {
       borderRadius: 18,
       border: "1px solid #1b2340",
       background: "linear-gradient(180deg, rgba(18,24,43,0.85), rgba(12,16,28,0.85))",
     };
 
-    const btn: React.CSSProperties = {
+    const btn: CSSProperties = {
       padding: "10px 14px",
       borderRadius: 12,
       fontWeight: 800,
@@ -113,13 +115,13 @@ export default function UploadPage() {
         minHeight: "100vh",
         color: "#e6e8ee",
         fontFamily: "Arial, sans-serif",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       container: {
         maxWidth: 1100,
         margin: "0 auto",
         padding: "18px 20px 60px",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       topbar: {
         display: "flex",
@@ -127,19 +129,19 @@ export default function UploadPage() {
         justifyContent: "space-between",
         gap: 12,
         marginBottom: 18,
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      brand: { display: "flex", alignItems: "center", gap: 10 } as React.CSSProperties,
+      brand: { display: "flex", alignItems: "center", gap: 10 } as CSSProperties,
 
       logo: {
         width: 34,
         height: 34,
         borderRadius: 10,
         background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      title: { fontWeight: 900, letterSpacing: 0.2 } as React.CSSProperties,
-      subtitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
+      title: { fontWeight: 900, letterSpacing: 0.2 } as CSSProperties,
+      subtitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
 
       link: {
         color: "#b7bed1",
@@ -147,30 +149,30 @@ export default function UploadPage() {
         padding: "8px 10px",
         borderRadius: 10,
         border: "1px solid transparent",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       btnPrimary: {
         ...btn,
         background: "linear-gradient(135deg,#6ee7ff,#a78bfa)",
         color: "#0b0f1a",
         border: "none",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       btnGhost: {
         ...btn,
         background: "transparent",
         color: "#e6e8ee",
         border: "1px solid #2a3350",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
       btnDanger: {
         ...btn,
         background: "transparent",
         color: "#ffd4d4",
         border: "1px solid rgba(255,80,80,0.35)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      hero: { ...card, padding: 18, marginBottom: 16 } as React.CSSProperties,
+      hero: { ...card, padding: 18, marginBottom: 16 } as CSSProperties,
 
       pill: {
         display: "inline-block",
@@ -181,15 +183,15 @@ export default function UploadPage() {
         color: "#dfe3f1",
         border: "1px solid rgba(110,231,255,0.25)",
         background: "rgba(110,231,255,0.08)",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      h1: { margin: "10px 0 8px", fontSize: 26, lineHeight: 1.15 } as React.CSSProperties,
-      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as React.CSSProperties,
+      h1: { margin: "10px 0 8px", fontSize: 26, lineHeight: 1.15 } as CSSProperties,
+      p: { margin: 0, color: "#b7bed1", lineHeight: 1.7 } as CSSProperties,
 
-      grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } as React.CSSProperties,
+      grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } as CSSProperties,
 
       card,
-      cardPad: { ...card, padding: 18 } as React.CSSProperties,
+      cardPad: { ...card, padding: 18 } as CSSProperties,
 
       drop: (key: DatasetKey) =>
         ({
@@ -199,33 +201,33 @@ export default function UploadPage() {
           background: dragOverKey === key ? "rgba(110,231,255,0.08)" : "rgba(20,27,48,0.35)",
           padding: 14,
           transition: "200ms ease",
-        }) as React.CSSProperties,
+        }) as CSSProperties,
 
-      dropTitle: { fontWeight: 900, marginBottom: 6 } as React.CSSProperties,
-      hint: { fontSize: 13, color: "#8f97ad", lineHeight: 1.6 } as React.CSSProperties,
+      dropTitle: { fontWeight: 900, marginBottom: 6 } as CSSProperties,
+      hint: { fontSize: 13, color: "#8f97ad", lineHeight: 1.6 } as CSSProperties,
 
-      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 } as React.CSSProperties,
+      row: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 } as CSSProperties,
 
       kpiGrid: {
         display: "grid",
         gridTemplateColumns: "repeat(3, 1fr)",
         gap: 10,
         marginTop: 12,
-      } as React.CSSProperties,
+      } as CSSProperties,
       kpi: {
         padding: 12,
         borderRadius: 14,
         border: "1px solid #202946",
         background: "rgba(20,27,48,0.55)",
-      } as React.CSSProperties,
-      kpiTitle: { fontSize: 12, color: "#aab1c4" } as React.CSSProperties,
-      kpiValue: { fontSize: 18, fontWeight: 950, marginTop: 6 } as React.CSSProperties,
+      } as CSSProperties,
+      kpiTitle: { fontSize: 12, color: "#aab1c4" } as CSSProperties,
+      kpiValue: { fontSize: 18, fontWeight: 950, marginTop: 6 } as CSSProperties,
 
-      tableWrap: { marginTop: 12, overflowX: "auto" } as React.CSSProperties,
-      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as React.CSSProperties,
-      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as React.CSSProperties,
-      tr: { background: "rgba(20,27,48,0.55)" } as React.CSSProperties,
-      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as React.CSSProperties,
+      tableWrap: { marginTop: 12, overflowX: "auto" } as CSSProperties,
+      table: { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" } as CSSProperties,
+      th: { textAlign: "left", fontSize: 12, color: "#aab1c4", fontWeight: 800, padding: "0 10px" } as CSSProperties,
+      tr: { background: "rgba(20,27,48,0.55)" } as CSSProperties,
+      td: { padding: "10px 10px", fontSize: 13, color: "#c8cee0" } as CSSProperties,
 
       error: {
         marginTop: 12,
@@ -234,9 +236,9 @@ export default function UploadPage() {
         border: "1px solid rgba(255,80,80,0.35)",
         background: "rgba(255,80,80,0.08)",
         color: "#ffd4d4",
-      } as React.CSSProperties,
+      } as CSSProperties,
 
-      footerNote: { marginTop: 10, fontSize: 12, color: "#8f97ad" } as React.CSSProperties,
+      footerNote: { marginTop: 10, fontSize: 12, color: "#8f97ad" } as CSSProperties,
     };
   }, [dragOverKey]);
 
